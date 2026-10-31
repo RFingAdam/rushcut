@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "description": "Game-agnostic story formats for gameplay long-form. Templates use {slot} placeholders; plan_story_edit fills start_value, end_value, n, cold_open_label and cold_open_value from beats and takes the rest from its slots argument.",
+  "slots": {
+    "game": "Game name as viewers search it.",
+    "role": "What the player is (solo sniper, medic, builder, trader).",
+    "item": "The unlock, weapon, vehicle or kit at the centre of the video.",
+    "build": "The structure or setup being built.",
+    "constraint": "The rule that makes it a challenge (no vehicles, only found gear, one life).",
+    "goal": "The goal in a few words.",
+    "plan": "The plan in one clause.",
+    "open_loop": "A tease of something that goes wrong or surprises later.",
+    "hours": "Time budget in hours.",
+    "enemy_group": "The antagonist (a named squad, a full server, a 30-player clan).",
+    "episode": "Episode number in a series.",
+    "series": "Series name.",
+    "season": "Season or wipe number.",
+    "patch": "Patch or update name.",
+    "cheap_price": "Price of the cheapest tier.",
+    "expensive_price": "Price of the most expensive tier.",
+    "metric": "What a measured test measures, with units.",
+    "start_value": "Auto: value of the first beat that has one.",
+    "end_value": "Auto: value of the last beat that has one.",
+    "n": "Auto: number of planned sections.",
+    "cold_open_label": "Auto: label of the cold-open beat.",
+    "cold_open_value": "Auto: value of the cold-open beat."
+  },
+  "shared_recipe": [
+    "Goal, plan and a 2-3 s flash-forward of the payoff inside the first 15 s.",
+    "A trackable spine (methods, price tiers, levels, episodes) with one chapter per step.",
+    "Past-tense narration bridges with open loops between steps.",
+    "Every section ends on a number the viewer can track.",
+    "A fast ending: verdict, then the subscribe ask.",
+    "The game HUD is the counter; a facecam is optional.",
+    "Thumbnail: start state vs end state with one or two huge numbers."
+  ],
+  "pacing_gate": {
+    "measure": "Whisper word timestamps (large-v3 recommended for comparable numbers). A dead stretch is a gap of dead_threshold_s or more with no transcribed word, including the lead-in and the tail.",
+    "dead_threshold_s": 8,
+    "allowed_dead_stretches": 0,
+    "deliberate_payoff_silence_max_s": 4,
+    "overall_wpm_min_narrated": 110,
+    "promise_by_s": 15,
+    "chapters": {"first_at_s": 0, "min_count": 3, "min_length_s": 10}
+  },
+  "formats": [
+    {
+      "id": "timed_money_run",
+      "name": "Timed money run",
+      "when_to_use": "A fresh economy (launch, wipe, new character) or any game with a visible money or score counter. The video answers one question: how much can this method make in a fixed time?",
+      "title_templates": [
+        "How Much Money Can a {role} Make in {hours} Hours? ({game})",
+        "{start_value} to {end_value} in {hours} Hours as a {role} | {game}",
+        "I Played {game} for {hours} Hours, {constraint}. Here's What I Made"
+      ],
+      "thumbnail_template": {
+        "layout": "Split frame: start state on the left, end state on the right, one huge number per side.",
+        "text_options": ["HOUR 0 → HOUR {hours}", "{start_value} → {end_value}"],
+        "notes": ["Use real gameplay frames; the HUD counter is the proof.", "Two numbers at most; nothing else to read."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the final counter: {cold_open_value}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "I gave myself {hours} hours to make as much as I could in {game}, starting from {start_value}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "The plan: {plan}. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "hour or money method",
+        "description": "One section per hour or per method, in order. Show the running total at every boundary.",
+        "steps": ["Rules and start state", "Method or hour 1", "Method or hour 2 ...", "Final tally"]
+      },
+      "section_end_rule": "End every section on the running total (HUD or a one-line card) before the cut.",
+      "narration": {
+        "style": "Past-tense VO bridges over gameplay ('By hour three I'd found...'), each ending on an open loop.",
+        "wpm_target": [145, 165],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["By then I was at {value}, and the next part cost more than I expected.", "That put me at {value}. It didn't last."]
+      },
+      "chapters": "One chapter per hour or method, titled with the number it ends on ('Hour 3: $48K'). The 0:00 chapter is the goal.",
+      "length_minutes": [8, 20],
+      "timing": {"window": "launch or wipe +3 to 10 days", "notes": "Fresh economies make the money question everyone's question. Testing it on camera beats being first."},
+      "ending": "Final total on screen, a one-line verdict on the method, then subscribe. Under 20 s.",
+      "pitfalls": [
+        "Hiding the total until the end instead of showing it at every boundary.",
+        "Methods viewers cannot copy (admin help, exploits).",
+        "Looting or travel stretches with no narration.",
+        "A title number that first appears after minute 5."
+      ]
+    },
+    {
+      "id": "unlock_grind",
+      "name": "Unlock grind",
+      "when_to_use": "A new or reset progression tree where one unlock is the first-week question: how long until I get it?",
+      "title_templates": [
+        "I Played {role} Until I Unlocked the {item} in {game}",
+        "How Long Does It Take a Solo {role} to Unlock the {item}? ({game})",
+        "{game}, But I Can't Stop Until I Unlock the {item}..."
+      ],
+      "thumbnail_template": {
+        "layout": "Split frame: starter gear on the left, the unlocked item on the right; a tier or level marker on each side.",
+        "text_options": ["LVL {start_value} → LVL {end_value}", "HOUR 0 → {item}"],
+        "notes": ["The unlock screen or the item in hand is the right half.", "Show the tier number or progress bar, not a paragraph."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the unlock screen or the {item} firing."},
+        {"window_s": [3, 9], "beat": "goal", "template": "I wasn't allowed to stop playing until I unlocked the {item}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "{n} tiers stood in the way. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "tier or level",
+        "description": "One section per tier, with the level or XP and the elapsed time at each boundary. Close with 30-60 s of the unlock in use.",
+        "steps": ["Start state and rules", "Tier 1", "Tier 2 ...", "Unlock", "Unlock tested in a real match"]
+      },
+      "section_end_rule": "End each tier on the level or XP number and the time spent so far.",
+      "narration": {
+        "style": "Past-tense VO bridges; each tier ends on an open loop about the next tier's problem.",
+        "wpm_target": [145, 165],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["{value}, and the next tier took longer than the last two combined.", "That was {value}. The next tier is where it got ugly."]
+      },
+      "chapters": "One chapter per tier ('Tier 2: 3h 10m'), then 'Testing the {item}'.",
+      "length_minutes": [10, 25],
+      "timing": {"window": "wipe or launch +0 to 5 days", "notes": "The answer goes stale once most players have the unlock."},
+      "ending": "The final time and level, a verdict on whether the unlock was worth it, then subscribe.",
+      "pitfalls": [
+        "Skipping tiers without saying so.",
+        "Grind footage with no visible counter.",
+        "Ending on the unlock screen without showing the item work."
+      ]
+    },
+    {
+      "id": "price_ladder",
+      "name": "Price ladder (cheap vs expensive)",
+      "when_to_use": "Gear with clear price tiers, especially after an economy change or in a mode that caps gear. Viewers want to know whether the expensive option is worth it.",
+      "title_templates": [
+        "{cheap_price} vs {expensive_price} {item} in {game}: Is It Worth It?",
+        "Cheapest vs Most Expensive {item} ({game})",
+        "I Tested Every {item} Tier From {cheap_price} to {expensive_price}"
+      ],
+      "thumbnail_template": {
+        "layout": "Two kits side by side, each with its total price in a big box.",
+        "text_options": ["{cheap_price} VS {expensive_price}", "CHEAP → {expensive_price}"],
+        "notes": ["The prices are the text.", "Same pose and background for both kits so the price is the only difference."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the surprising result: the cheap kit winning or the expensive one failing."},
+        {"window_s": [3, 9], "beat": "goal", "template": "Is the {expensive_price} {item} actually better than the {cheap_price} one?"},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "{n} tiers, the same test for each. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "price tier",
+        "description": "Cheapest to most expensive, every tier through the same test, with price and score on screen.",
+        "steps": ["The test and the rules", "Cheapest tier", "Middle tiers ...", "Most expensive tier", "Score table and verdict"]
+      },
+      "section_end_rule": "End each tier on its score for the same test (kills, money, time survived) next to its price.",
+      "narration": {
+        "style": "Scripted comparison VO, present or past tense; restate price and score at each boundary.",
+        "wpm_target": [155, 180],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["For {value}, that's the score to beat.", "{value} bought a lot less than I thought."]
+      },
+      "chapters": "One chapter per tier, titled with the price ('$5K kit'), then 'Verdict'.",
+      "length_minutes": [6, 15],
+      "timing": {"window": "within 2 weeks of an economy, vendor or mode change", "notes": "Gear-capped modes reset which tier is worth buying."},
+      "ending": "A score-per-price table, the pick for most players, then subscribe.",
+      "pitfalls": [
+        "Changing the test between tiers.",
+        "No price on screen when a tier is introduced.",
+        "Burying the verdict after the outro."
+      ]
+    },
+    {
+      "id": "build_payoff",
+      "name": "Build-and-payoff blueprint",
+      "when_to_use": "A buildable structure or setup that viewers can copy, followed by proof that it works in a real match.",
+      "title_templates": [
+        "I Built a {build} Solo. Did It Pay Off?",
+        "The {build} Nobody Is Using in {game}",
+        "Solo {build} in {game}: Built in Minutes, Paid Back {end_value}"
+      ],
+      "thumbnail_template": {
+        "layout": "The finished build from its best angle, with one benefit line and one number.",
+        "text_options": ["SOLO {build}", "{build} → {end_value}"],
+        "notes": ["Arrow to the key part of the build.", "Real screenshot of the build, ideally under attack."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the build working: {cold_open_label}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "Today I'm building a {build} alone, using only {constraint}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "The plan: {plan}. It has to pay for itself before the match ends. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "build stage",
+        "description": "Supplies, placement, structure, defence, then the build tested in a real match and the payoff counted.",
+        "steps": ["Supplies and loadout", "Placement", "Structure", "Defence", "Live test", "Payoff"]
+      },
+      "section_end_rule": "End each stage on a number: supplies left, minutes elapsed, cost so far, then kills or money once it is live.",
+      "narration": {
+        "style": "Instructional VO ('you'll want to...') for build stages, switching to past-tense story VO for the live test.",
+        "wpm_target": [150, 175],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["That's {value} spent so far.", "With the walls up at {value}, the first attack came early."]
+      },
+      "chapters": "One chapter per build stage, then 'Live test' and 'Payoff: {end_value}'.",
+      "length_minutes": [6, 15],
+      "timing": {"window": "any time; strongest in the first days of a wipe when everyone rebuilds", "notes": "Sequels work well as '2.0' versions of the same build."},
+      "ending": "The payoff number against the cost, a one-line verdict, a pointer to the next build, then subscribe.",
+      "pitfalls": [
+        "A tutorial with no live test.",
+        "Practice-range footage only.",
+        "No running cost or payoff number."
+      ]
+    },
+    {
+      "id": "narrated_solo_story",
+      "name": "Narrated solo story",
+      "when_to_use": "A solo player against a bigger force (a clan, a full server) or a role challenge ('deadliest X'). Works for viewers who do not play the game.",
+      "title_templates": [
+        "How I Became {game}'s Deadliest {role}",
+        "Solo vs {enemy_group}: {goal}",
+        "This {game} Server Didn't Know I Existed..."
+      ],
+      "thumbnail_template": {
+        "layout": "The hidden or outnumbered player on one side with 'ME' and an arrow; the unaware enemy on the other.",
+        "text_options": ["ME", "1 VS {enemy_group}"],
+        "notes": ["Zero or one word.", "Real screenshot of the hide or the overwatch position works if art is not an option."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the climax: {cold_open_label}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "Me, alone, against {enemy_group}. {goal}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "The rules: {constraint}. I had {n} goals, and I couldn't log off until they were done. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "goal checklist or story act",
+        "description": "An N-goal contract that unlocks tiers, or acts split by base moves and rival encounters. Show the checklist count at each act break.",
+        "steps": ["Premise and contract", "Act 1: set up", "Act 2: first rival contact", "Act 3: escalation ...", "Final stand", "Aftermath"]
+      },
+      "section_end_rule": "End each act on the checklist count ('3 of 10 done') or the score so far.",
+      "narration": {
+        "style": "Past-tense storytelling VO ('I'd soon find out...') woven with live reactions; calm, dry, amused.",
+        "wpm_target": [130, 150],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["That made {value}. They still had no idea where I was.", "{value}, and the hard part hadn't started."]
+      },
+      "chapters": "One chapter per act or goal, titled as a story beat ('The first ambush', 'Goal 4 of 10').",
+      "length_minutes": [15, 60],
+      "timing": {"window": "evergreen; set it on wipe day in the story", "notes": "Stories do not depend on the release calendar, but 'on wipe day' framing still helps."},
+      "ending": "The aftermath, the final count, one reflective line, then subscribe.",
+      "pitfalls": [
+        "No stakes or antagonist in the first sentence.",
+        "Long silent sneaking: cut it to 4 s or less or narrate over it.",
+        "Generic AI-art thumbnails where the community dislikes them."
+      ]
+    },
+    {
+      "id": "season_series",
+      "name": "Season series (rags to riches EPn)",
+      "when_to_use": "A launch or wipe where a broke-start series can run for weeks. The episode number becomes the reason to come back.",
+      "title_templates": [
+        "How a BROKE Solo Starts... {game} (Rags to Riches EP{episode})",
+        "{goal}... {game} ({series} EP{episode})",
+        "Starting From Nothing in Season {season} of {game} (EP{episode})"
+      ],
+      "thumbnail_template": {
+        "layout": "Series wordmark across the top, 'EP n' badge, one hero object or number.",
+        "text_options": ["EP {episode}: {end_value}", "RAGS TO RICHES EP {episode}"],
+        "notes": ["Keep the wordmark and layout identical across episodes.", "The episode number must be readable at phone size."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of this episode's best moment: {cold_open_label}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "EP1: start from nothing, every session recorded, nothing off camera. Later episodes: last time I finished on {start_value}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "Today: {plan}. The craziest moment is at the end. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "session within an episode",
+        "description": "Sessions in order, net worth or stash value at each boundary. A season reset starts a new EP1.",
+        "steps": ["Recap (under 20 s)", "Session 1", "Management (stash, upgrades)", "Session 2 ...", "Closing number and next-episode tease"]
+      },
+      "section_end_rule": "End each session on the stash or net-worth number; end the episode on the number the next one starts from.",
+      "narration": {
+        "style": "Hybrid: live commentary in sessions, recorded past-tense VO for the recap and between sessions.",
+        "wpm_target": [130, 155],
+        "overall_wpm_min": 110,
+        "bridge_templates": ["That left me at {value}. Not enough yet.", "{value} in the stash, and one run I almost didn't record."]
+      },
+      "chapters": "One chapter per session plus 'Recap' at 0:00 and 'Where we stand' at the end.",
+      "length_minutes": [20, 50],
+      "timing": {"window": "EP1 in the first week after a launch or wipe, then 1-2 episodes a week until mid-season", "notes": "Missing a week breaks the habit the series depends on."},
+      "ending": "The closing number, what next episode is about, a comment prompt, then subscribe.",
+      "pitfalls": [
+        "No episode number on the thumbnail.",
+        "Recaps longer than 20 s.",
+        "Gaps of more than a week between episodes."
+      ]
+    },
+    {
+      "id": "patch_week_take",
+      "name": "Patch-week take",
+      "when_to_use": "The first 24-72 h after a patch, wipe or new unlock: a fast 'X is BROKEN' first take or an N-tips list.",
+      "title_templates": [
+        "{item} is BROKEN in {game}",
+        "{n} {game} Tips You Probably Didn't Know",
+        "{n} Changes in {patch} That Matter for {role}"
+      ],
+      "thumbnail_template": {
+        "layout": "One hero image (the item, or the most surprising tip in action) with huge text built around a number or BROKEN.",
+        "text_options": ["{item} IS BROKEN", "{n} TIPS"],
+        "notes": ["Tip 1 or the BROKEN claim must be what the thumbnail shows.", "A circle or arrow on the one thing that matters."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the claim in action: {cold_open_label}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "Did you know {item} can do this? I've put {hours}+ hours in, and even veterans miss it."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "{n} of them, and the last one is the strangest. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "tip or change",
+        "description": "A numbered list; every tip or change is its own chapter and shows its effect.",
+        "steps": ["Tip 1 (the thumbnail promise)", "Tip 2 ...", "Bonus tip"]
+      },
+      "section_end_rule": "End each tip on its measurable effect (damage, seconds saved, money, range).",
+      "narration": {
+        "style": "Tightly scripted VO with pauses cut out; one tip per breath.",
+        "wpm_target": [165, 200],
+        "overall_wpm_min": 140,
+        "bridge_templates": ["That's {value}. Next one's better.", "Saves {value} every time."]
+      },
+      "chapters": "One chapter per tip, numbered ('3. Faster reloads').",
+      "length_minutes": [3, 12],
+      "timing": {"window": "patch, wipe or unlock +0 to 48 h", "notes": "After 72 h the take is old news."},
+      "ending": "The bonus tip, a comment prompt for tips that were missed, then subscribe.",
+      "pitfalls": [
+        "Posting after the first 72 h.",
+        "Padding the list with weak tips.",
+        "Opinions with no numbers."
+      ]
+    },
+    {
+      "id": "measured_test",
+      "name": "Measured test",
+      "when_to_use": "A question the community argues about that can be measured: cost per kill, damage at range, time per run, percent cheaper vs percent worse.",
+      "title_templates": [
+        "I Tested {item} So You Don't Have To ({metric})",
+        "Is {item} Worth It? I Measured It ({metric})",
+        "{cheap_price} Build vs {expensive_price} Build: {metric}"
+      ],
+      "thumbnail_template": {
+        "layout": "The result number is the thumbnail; the item or chart is secondary.",
+        "text_options": ["{end_value}", "{cheap_price} VS {expensive_price}"],
+        "notes": ["Units on every number.", "One comparison, not a table."]
+      },
+      "hook_0_15s": [
+        {"window_s": [0, 3], "beat": "flash_forward", "template": "2-3 s of the result card: {cold_open_value}."},
+        {"window_s": [3, 9], "beat": "goal", "template": "Everyone argues about {item}. I measured {metric}."},
+        {"window_s": [9, 15], "beat": "plan_and_open_loop", "template": "{n} tests, same conditions. One result surprised me. {open_loop}"}
+      ],
+      "spine": {
+        "unit": "test",
+        "description": "Problem, method, runs, numbers, comparison, recommendation.",
+        "steps": ["Question", "Method and sample size", "Test 1", "Test 2 ...", "Comparison", "Recommendation"]
+      },
+      "section_end_rule": "End each test on its measured number with units and sample size.",
+      "narration": {
+        "style": "Tightly scripted VO; state the method once, then numbers.",
+        "wpm_target": [160, 190],
+        "overall_wpm_min": 140,
+        "bridge_templates": ["That came out at {value}.", "{value}, which is not what the patch notes suggest."]
+      },
+      "chapters": "Question at 0:00, one chapter per test, then 'Results' and 'Recommendation'.",
+      "length_minutes": [3, 10],
+      "timing": {"window": "within 10 days of an update that changed the numbers", "notes": "Make tests a recurring series so growth does not stop when the patch window closes."},
+      "ending": "The recommendation in one line, the next test, then subscribe.",
+      "pitfalls": [
+        "One run presented as a result; always state the sample size.",
+        "Numbers without units.",
+        "A one-off test with no series behind it."
+      ]
+    }
+  ]
+}

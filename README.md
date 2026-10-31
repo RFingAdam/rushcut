@@ -16,7 +16,7 @@
 
 Rushcut MCP is a [Model Context Protocol](https://modelcontextprotocol.io)
 server (Python, [FastMCP](https://github.com/jlowin/fastmcp)) that exposes
-**67 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
+**71 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
 Cursor, or anything else that speaks stdio MCP. The same tool names
 (`add_track`, `place_media`, `trim_event`, `set_event_fades`,
 `render_with_preset`, ...) drive whichever backend you select with
@@ -48,6 +48,7 @@ Blackmagic Design. See [NOTICE](NOTICE).
 - [Tool catalog](#tool-catalog)
 - [Quality checks](#quality-checks)
 - [Example: a headless FFmpeg edit](#example-a-headless-ffmpeg-edit)
+- [Story formats & pacing](#story-formats--pacing)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Security](#security)
@@ -159,7 +160,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-67 tools, generated from the server's registered tool list. Tool names are
+71 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -177,6 +178,7 @@ reason instead of raising.
 | Analysis, no NLE needed (4) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media` |
 | Quality, no NLE needed (2) | `check_output`, `validate_profile` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
+| Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
 | File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
 | Resolve Studio extras (3) | `resolve_create_subtitles`, `resolve_smart_reframe`, `resolve_set_voice_isolation` |
 | Deprecated stubs (3) | `find_highlights`, `apply_vertical_short`, `propose_edit` (return a migration error; see [docs/MIGRATION.md](docs/MIGRATION.md)) |
@@ -314,6 +316,77 @@ The agent can also skip the timeline and work on files directly:
 `mix_audio`, `normalize_audio` (EBU R128 `loudnorm`), then
 `generate_captions` + `burn_captions`. See [docs/FFMPEG.md](docs/FFMPEG.md).
 
+## Story formats & pacing
+
+Rushcut ships a small, game-agnostic library of long-form story formats
+(`server/rushcut/formats/library.json`) and planning tools built on it.
+None of them need an NLE, and none of them rank footage: the agent (or you)
+logs the beats, and the tools turn them into a plan and then check the cut.
+
+| Format id | Shape |
+|---|---|
+| `timed_money_run` | Fixed time budget, running money total, start-vs-end thumbnail |
+| `unlock_grind` | Play until one unlock; one section per tier |
+| `price_ladder` | Cheapest to most expensive tier through the same test |
+| `build_payoff` | Build stages, then the build tested live and the payoff counted |
+| `narrated_solo_story` | Solo vs a bigger force, or a "deadliest X" role, in past-tense VO |
+| `season_series` | Broke-start episodic series with the episode number on every thumbnail |
+| `patch_week_take` | "X is BROKEN" or N tips within 48 h of a patch |
+| `measured_test` | One measured question; the number is the thumbnail |
+
+Each format has title templates, a thumbnail template, a 0-15 s hook (goal,
+plan and a 2-3 s flash-forward), the spine, a section-end rule (every section
+ends on a number), narration style and words-per-minute target, chapter
+guidance, a length range, the launch/wipe/patch window it suits, and
+pitfalls.
+
+- `list_story_formats(summary_only=False)` returns the library, the shared
+  recipe, the slot names and the pacing gate.
+- `plan_story_edit(format_id, beats, target_minutes, slots=None,
+  vo_gap_seconds=8, max_sections=None)` takes beats logged from the footage,
+  `[{"t_sec": ..., "label": ..., "value": ...}]`, and returns a cold-open
+  pick (a beat marked `"cold_open": true`, else the highest `strength`, else
+  the largest value), sections that each end on a beat with a value, a
+  YouTube-valid chapter list for the planned cut (first at 0:00, at least 3,
+  each 10 s or more), VO slots wherever two beats are 8 s or more apart, and
+  title, thumbnail and hook lines filled from the templates. Placeholders the
+  beats cannot fill (`{game}`, `{role}`, ...) come from `slots`; anything
+  still open is listed in `missing_slots`.
+- `chapters_from_beats(beats, total_seconds=None, min_chapter_seconds=10)`
+  builds the description chapter block from edited-timeline times and lists
+  anything it had to drop.
+- `measure_pacing(media_path, dead_threshold_s=8, promise_keywords=None,
+  model_size="base", language="en")` runs local Whisper (the `.[whisper]`
+  extra) and returns duration, words per minute, every stretch of 8 s or
+  more with no transcribed word (lead-in and tail included), total dead
+  seconds, the longest gap, the words in the first 15 s and, when you pass
+  keywords, when the title's promise is first spoken. Pass
+  `model_size="large-v3"` for numbers you compare across videos; smaller
+  models drop words and overstate dead stretches.
+
+The default pacing gate (in `library.json`, and the `gate` block of
+`measure_pacing`): no gaps of 8 s or more (deliberate payoff silences stay
+at 4 s or less), at least 110 wpm on narrated story videos, the title's
+promise spoken by 0:15, and chapters on every long-form upload.
+
+```python
+from rushcut.formats import plan_story_edit
+
+plan = plan_story_edit(
+    "unlock_grind",
+    beats=[
+        {"t_sec": 0, "label": "Fresh account", "value": "LVL 1"},
+        {"t_sec": 1900, "label": "Tier 2", "value": "LVL 9"},
+        {"t_sec": 4100, "label": "Tier 3", "value": "LVL 17"},
+        {"t_sec": 5200, "label": "Unlocked", "value": "LVL 24", "cold_open": True},
+    ],
+    target_minutes=12,
+    slots={"game": "My Game", "role": "Medic", "item": "Battle Rifle"},
+)
+print(plan["chapters_text"])
+print(plan["titles"][0]["text"])  # I Played Medic Until I Unlocked the Battle Rifle in My Game
+```
+
 ## Architecture
 
 ```mermaid
@@ -321,7 +394,7 @@ flowchart LR
     client["MCP client<br/>Claude Code / Desktop / Cursor"] -- "stdio (MCP)" --> server
 
     subgraph server["Rushcut MCP server (Python, FastMCP)"]
-        tools["67 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
+        tools["71 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
         facade --> select{"DIRECTOR_EDITOR"}
         tools --> analysis["analysis/ + render/ + quality/<br/>probe, transcript, captions,<br/>speech boundaries, verify"]
     end
