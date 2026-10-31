@@ -1,10 +1,11 @@
-"""Media grounding: ffprobe, scenes, loudness, captions, file-level ffmpeg ops.
+"""Media grounding: ffprobe, scenes, loudness, captions, pacing, file-level ffmpeg ops.
 
 These modules are pure Python + ffmpeg. They do not talk to an NLE.
 """
 from .audio import analyze_audio
 from .captions import burn_captions, generate_captions
 from .edit_ops import concat_media, cut_media, mix_audio, normalize_audio, reframe_media
+from .pacing import measure_pacing, pacing_from_words
 from .probe import probe_media
 from .scenes import detect_scenes
 from .whisper import transcribe_media
@@ -16,8 +17,10 @@ __all__ = [
     "cut_media",
     "detect_scenes",
     "generate_captions",
+    "measure_pacing",
     "mix_audio",
     "normalize_audio",
+    "pacing_from_words",
     "probe_media",
     "reframe_media",
     "transcribe_media",

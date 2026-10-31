@@ -39,3 +39,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["rushcut*", "cutrelay*", "nle_mcp*", "vegas_director_mcp*"]
+
+[tool.setuptools.package-data]
+"rushcut.formats" = ["*.json"]

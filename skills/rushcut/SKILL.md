@@ -1,6 +1,6 @@
 ---
 name: rushcut-mcp
-description: Drive an editor-agnostic MCP video-edit bridge (FFmpeg, VEGAS Pro, or DaVinci Resolve Studio). Use when probing media, building a timeline, trimming, mixing audio, burning captions, reframing, or rendering.
+description: Drive an editor-agnostic MCP video-edit bridge (FFmpeg, VEGAS Pro, or DaVinci Resolve Studio). Use when probing media, building a timeline, trimming, mixing audio, burning captions, reframing, rendering, planning a long-form story format, or measuring narration pacing.
 ---
 
 # rushcut-mcp
@@ -27,6 +27,27 @@ edits.
    - `generate_captions` then `burn_captions`, or `add_title`
 5. `render_with_preset` (`1080p`, `vertical`, `4k`) or `render_start`.
 6. `verify_output` on the file.
+
+## Story formats & pacing
+
+For long-form gameplay stories:
+
+1. `list_story_formats` (`summary_only=true` to browse) and pick a format id.
+2. Log beats from the footage yourself: `[{t_sec, label, value?}]`. Give a
+   value to every beat that closes a step (money, level, price, count), and
+   mark the payoff `cold_open: true` when the largest value is not it.
+3. `plan_story_edit(format_id, beats, target_minutes, slots={game, role, item, ...})`.
+   Fill anything in `missing_slots`, then cut to the plan: 2-3 s
+   flash-forward at 0:00, goal and plan by 0:15, every section ends on its
+   value, and every `vo_slots` gap is narrated or trimmed.
+4. After the cut, `chapters_from_beats` with edited-timeline times gives the
+   description chapter block (first 0:00, 3+, each 10 s+).
+5. `measure_pacing` on the render (`model_size="large-v3"` when comparing
+   videos, `promise_keywords` for the title's promise). Gate: no dead
+   stretches of 8 s+, 110+ wpm on narrated stories, promise by 0:15. Fix and
+   re-render until `gate_passed` is true.
+
+These tools never rank footage; you choose the beats.
 
 ## Guardrails
 

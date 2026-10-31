@@ -37,6 +37,7 @@ an `UndoBlock` on the UI thread.
 | Project | `project.set_video` | ✅ width / height / frame_rate |
 | Host start | Application Extension / Script Menu / `ensure_host` | ✅ live TCP, `/RUNSCRIPT`, or `/CMDMODULE` path; tools set `used_mode` |
 | Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `generate_captions`, `burn_captions` | ✅ |
+| Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP-side only; no host RPC) |
 | File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` | ✅ |
 | Edit helpers | `apply_crossfade`, `apply_ducking` | ✅ |
 | Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` | ✅ (preset matching walks the full template list; MAGIX AVC/AAC aliases) |
