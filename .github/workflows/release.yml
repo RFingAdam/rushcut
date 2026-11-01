@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # A change to the release path is proved here, up to the upload, before it can reach a tag.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "server/build-constraints.txt"
+      - "server/pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.6"
+          enable-cache: false
+
+      # PyPI never lets a version be reused, so catch mistakes here. This check and the version
+      # check below are not a security boundary, because a tagged commit can edit this file. The
+      # repository's tag ruleset and the pypi environment's tag policy restrict publishing.
+      - name: Refuse a tag that is not on main
+        if: github.ref_type == 'tag'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Public boundary check
+        run: uv run --no-project --python 3.12 python scripts/check_boundary.py
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Run tests
+        working-directory: server
+        run: uv run --no-project --python 3.12 --with-editable ".[dev]" pytest -q
+
+  # Kept apart from the jobs above and below: dependencies there are resolved at run time, and
+  # nothing unlocked may run where the published files are made. build-constraints.txt pins the
+  # build backend by hash, and this job installs nothing else.
+  build:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.6"
+          enable-cache: false
+
+      - name: Build package
+        working-directory: server
+        run: uv build --python 3.12 --build-constraint build-constraints.txt --require-hashes --out-dir ../dist
+
+      - name: Refuse a tag that does not match the package version
+        if: github.ref_type == 'tag'
+        run: test -f "dist/rushcut_mcp-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.6"
+          enable-cache: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Check the package metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Install the wheel and load every command
+        run: |
+          uv venv --python 3.12 wheel-env
+          uv pip install --python wheel-env/bin/python dist/*.whl
+          wheel-env/bin/python -c '
+          from importlib.metadata import distribution
+          commands = [e for e in distribution("rushcut-mcp").entry_points if e.group == "console_scripts"]
+          assert commands, "no console scripts"
+          for command in commands:
+              command.load()
+          print("loaded", [c.name for c in commands])
+          '
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [build, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/rushcut-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          flags=""
+          case "$GITHUB_REF_NAME" in
+            *a*|*b*|*rc*) flags="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes $flags dist/*
