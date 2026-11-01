@@ -209,7 +209,10 @@ public partial class EntryPoint
         }
 
         requestCount++;
-        if (!TokensEqual(Json.GetString(requestJson, "token"), authToken))
+        string token;
+        try { token = Json.GetString(requestJson, "token"); }
+        catch { token = null; }
+        if (!TokensEqual(token, authToken))
             return RpcResponse.Error(req.Id, -32001, "Unauthorized: missing or wrong token");
 
         try
