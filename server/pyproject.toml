@@ -2,8 +2,21 @@
 name = "rushcut-mcp"
 version = "0.4.0"
 description = "Rushcut MCP: editor-agnostic AI video editing over MCP (FFmpeg-first; VEGAS Pro, DaVinci Resolve, OTIO/FCPXML/MLT backends)."
+readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "RFingAdam" }]
+keywords = ["mcp", "video-editing", "ffmpeg", "vegas-pro", "davinci-resolve", "otio"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video :: Non-Linear Editor",
+]
 dependencies = [
     "fastmcp>=0.4.0",
     "pydantic>=2.0",
@@ -34,7 +47,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
