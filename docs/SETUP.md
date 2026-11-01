@@ -56,7 +56,7 @@ same folder.
 3. Start **VEGAS** (2027 or 22). The host should already be listening — no
    *Tools > Scripting* step.
 4. Optional status pane: *View > Extensions > Vegas Director Host*.
-5. Extension mode writes a per-user token to
+5. The host writes a per-user token to
    `%LOCALAPPDATA%\vegas-director-mcp\token` (created on first start,
    readable only by this Windows user). The MCP client sends it
    automatically. **Do not commit that file.**

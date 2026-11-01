@@ -235,7 +235,7 @@ flowchart LR
 
     ff -- "subprocess" --> ffmpeg[("ffmpeg / ffprobe")]
     analysis -- "subprocess" --> ffmpeg
-    vg -- "TCP 127.0.0.1:8752<br/>+ token (extension mode)" --> host["C# host inside VEGAS Pro<br/>ScriptPortal.Vegas"]
+    vg -- "TCP 127.0.0.1:8752<br/>+ token" --> host["C# host inside VEGAS Pro<br/>ScriptPortal.Vegas"]
     rs -- "DaVinciResolveScript" --> resolve["DaVinci Resolve Studio 21.1+"]
     ot -- "save_project" --> files[(".otio / .fcpxml / .mlt")]
 ```
@@ -260,7 +260,7 @@ your MCP client config.
 | `VEGAS_HOST_ADDRESS` | `127.0.0.1` | Host address for the VEGAS RPC client. |
 | `VEGAS_HOST_PORT` | `8752` | Host TCP port. |
 | `VEGAS_HOST_PIPE_NAME` | `vegas-director` | Named pipe for `pipe` transport. |
-| `VEGAS_HOST_TOKEN` | read from `%LOCALAPPDATA%\vegas-director-mcp\token` | Auth token for extension-mode hosts. |
+| `VEGAS_HOST_TOKEN` | read from `%LOCALAPPDATA%\vegas-director-mcp\token` | Auth token for the VEGAS host. |
 | `VEGAS_HOST_TIMEOUT` | `60` | Per-request timeout in seconds (save / open / new / render use 1800). |
 | `VEGAS_HOST_LAUNCH_WAIT` | `45` | Seconds `ensure_host` waits for a launched VEGAS to come up. |
 | `VEGAS_EXE` | auto-detect (`vegas2027.exe`, `Vegas220.exe`) | VEGAS executable. `VEGAS220_EXE` is also read. |
@@ -280,14 +280,13 @@ your MCP client config.
 - **Loopback only.** The VEGAS host binds `IPAddress.Loopback`
   (`127.0.0.1:8752`); it never listens on a LAN interface. To drive VEGAS on
   another machine, use an SSH tunnel rather than changing the bind.
-- **Token in extension mode.** The auto-starting Application Extension
-  generates a random 32-byte token on first start, stores it in
-  `%LOCALAPPDATA%\vegas-director-mcp\token`, and rejects any request without
-  it (`-32001 Unauthorized`). The Python client reads the file automatically
-  or takes `VEGAS_HOST_TOKEN`. Never commit that file.
-- **Script Menu mode has no token.** When you start the host manually from
-  *Tools > Scripting*, any local process can reach the port while it runs.
-  Prefer extension mode on shared machines.
+- **Token in every mode.** The host generates a random 32-byte token on first
+  start, stores it in `%LOCALAPPDATA%\vegas-director-mcp\token`, and rejects
+  any request without it (`-32001 Unauthorized`), in both extension and Script
+  Menu mode. The Python client reads the file automatically or takes
+  `VEGAS_HOST_TOKEN`. Never commit that file.
+- **JSON only.** A connection whose line isn't a JSON object is closed unread,
+  so a web page can't reach the port with an HTTP request.
 - **Local processes, local files.** Analysis and FFmpeg tools run `ffmpeg` /
   `ffprobe` as subprocesses (argument lists, no shell) and read and write the
   paths the agent passes. Run the server as a user that should have access to
@@ -301,7 +300,7 @@ your MCP client config.
 |---|---|
 | `ffmpeg is not on PATH` | Install ffmpeg (it includes ffprobe) or set `FFMPEG_BIN` / `FFPROBE_BIN`. |
 | Tools appear but every timeline call fails with a VEGAS connection error | You are on the default `vegas` backend. Set `DIRECTOR_EDITOR=ffmpeg`, or start VEGAS with the host (see [docs/SETUP.md](docs/SETUP.md)) and call `ensure_host`. |
-| `-32001 Unauthorized: missing or wrong token` | Extension-mode host. Make sure the server runs as the same Windows user, or set `VEGAS_HOST_TOKEN` to the contents of `%LOCALAPPDATA%\vegas-director-mcp\token`. |
+| `-32001 Unauthorized: missing or wrong token` | Make sure the server runs as the same Windows user, or set `VEGAS_HOST_TOKEN` to the contents of `%LOCALAPPDATA%\vegas-director-mcp\token`. |
 | Resolve backend says scripting is unavailable | You need Resolve **Studio** 21.1+ with External scripting = Local. The free edition has no API. See [docs/RESOLVE.md](docs/RESOLVE.md). |
 | `transcribe_media` returns a soft failure | Install the extra: `pip install -e ".[whisper]"`. |
 | `ModuleNotFoundError: rushcut` after pulling | Re-run `pip install -e .` in `server/.venv` so the new package and console scripts are registered. |

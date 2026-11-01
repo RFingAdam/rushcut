@@ -4,8 +4,8 @@ Two transports are supported:
   - "tcp": loopback TCP (default). The current host listens here.
   - "pipe": Windows named pipe. Client path exists; the host does not listen.
 
-Extension-mode hosts require a token (VEGAS_HOST_TOKEN or the runtime file
-under %LOCALAPPDATA%\\vegas-director-mcp\\token). Script-menu mode does not.
+The host requires a token in every mode (VEGAS_HOST_TOKEN or the runtime file
+under %LOCALAPPDATA%\\vegas-director-mcp\\token).
 """
 from __future__ import annotations
 
@@ -27,10 +27,9 @@ def _token_file_path() -> str:
 
 
 def _load_host_token() -> str | None:
-    """Read the runtime token written by the extension host.
+    """Read the runtime token written by the host.
 
-    Script-menu mode does not require a token. Extension mode does. The file
-    lives under %LOCALAPPDATA%\\vegas-director-mcp\\token and is never shipped
+    The file lives under %LOCALAPPDATA%\\vegas-director-mcp\\token and is never shipped
     in the repo. Override with VEGAS_HOST_TOKEN.
     """
     env = os.environ.get("VEGAS_HOST_TOKEN", "").strip()
