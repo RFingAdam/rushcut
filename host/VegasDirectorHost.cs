@@ -21,7 +21,7 @@ public partial class EntryPoint
     private DateTime startedAt = DateTime.Now;
     private int requestCount = 0;
     private string mode = "script";
-    private string authToken = null;                       // required in extension mode
+    private string authToken = null;                       // set on start, required in every mode
     internal Func<RpcRequest, string> v2Dispatch = null;  // reserved for future host modules
     private readonly object renderGate = new object();
     private string renderJobId = "";
@@ -62,6 +62,14 @@ public partial class EntryPoint
         return tok;
     }
 
+    private static bool TokensEqual(string a, string b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        int diff = 0;
+        for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+        return diff == 0;
+    }
+
     public string StatusText()
     {
         return "Vegas Director MCP host v2 (" + mode + ")\r\nTCP 127.0.0.1:" + TcpPort +
@@ -89,6 +97,7 @@ public partial class EntryPoint
         }
         myVegas = vegas;
         mode = "script";
+        authToken = LoadOrCreateToken();
 
         // Vegas has no Invoke. A visible status Form on this (UI) thread
         // marshals ScriptPortal calls and keeps the host alive.
@@ -181,6 +190,9 @@ public partial class EntryPoint
             catch { break; }
             if (line == null) break;
             if (line.Trim().Length == 0) continue;
+            // Requests are one JSON object per line. Anything else, such as an HTTP
+            // request a web page aimed at this port, closes the connection unread.
+            if (line.TrimStart()[0] != '{') break;
             string response = Dispatch(line);
             try { writer.WriteLine(response); }
             catch { break; }
@@ -197,7 +209,10 @@ public partial class EntryPoint
         }
 
         requestCount++;
-        if (authToken != null && Json.GetString(requestJson, "token") != authToken)
+        string token;
+        try { token = Json.GetString(requestJson, "token"); }
+        catch { token = null; }
+        if (!TokensEqual(token, authToken))
             return RpcResponse.Error(req.Id, -32001, "Unauthorized: missing or wrong token");
 
         try
