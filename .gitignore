@@ -1,0 +1,72 @@
+# --- Secrets / local config (never commit) ---
+.env
+.env.*
+*.secret
+*secrets*
+appsettings.local.json
+config.local.*
+*.pfx
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- .NET / C# (Vegas script host) ---
+bin/
+obj/
+*.user
+*.suo
+*.dll
+*.pdb
+*.cache
+
+# --- Vegas Pro project artifacts (never ship user media/projects) ---
+*.veg
+*.veg.bak
+*.sfk
+*.sfl
+render_output/
+media/
+samples/local/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Local run state ---
+*.log
+logs/
+.pipe_state.json
+
+# --- Host runtime token (generated under %LOCALAPPDATA%, never commit) ---
+token
+**/vegas-director-mcp/token
+
+# --- Local snapshot cruft (patch leftovers, dumps, backups) ---
+*.bak
+*.pre-phase3-*
+_*_dump.txt
+patch_*.py
+host/phase3_handlers.cs.txt
+host/bin/
+
+# --- Local IP guard terms (never commit) ---
+.ip-denylist

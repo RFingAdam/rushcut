@@ -1,0 +1,41 @@
+[project]
+name = "rushcut-mcp"
+version = "0.4.0"
+description = "Rushcut MCP: editor-agnostic AI video editing over MCP (FFmpeg-first; VEGAS Pro, DaVinci Resolve, OTIO/FCPXML/MLT backends)."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "fastmcp>=0.4.0",
+    "pydantic>=2.0",
+    # analyze_audio uses audioop, which left the stdlib in Python 3.13.
+    "audioop-lts>=0.2.1; python_version >= '3.13'",
+]
+
+[project.urls]
+Homepage = "https://github.com/RFingAdam/rushcut"
+Repository = "https://github.com/RFingAdam/rushcut"
+Issues = "https://github.com/RFingAdam/rushcut/issues"
+Documentation = "https://github.com/RFingAdam/rushcut#readme"
+
+[project.scripts]
+rushcut-mcp = "rushcut:main"
+# Deprecated aliases, kept for one release.
+cutrelay-mcp = "rushcut:main"
+nle-mcp = "rushcut:main"
+vegas-director-mcp = "rushcut:main"
+
+[project.optional-dependencies]
+windows = ["pywin32>=306"]
+whisper = ["faster-whisper>=1.0.3"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["rushcut*", "cutrelay*", "nle_mcp*", "vegas_director_mcp*"]
