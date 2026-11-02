@@ -10,7 +10,7 @@
 **Rushcut: AI video editing over MCP. Point any agent at your footage; get edits from FFmpeg, VEGAS Pro, DaVinci Resolve or an OTIO/FCPXML/MLT timeline.**
 
 [![CI](https://github.com/RFingAdam/rushcut/actions/workflows/ci.yml/badge.svg)](https://github.com/RFingAdam/rushcut/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](server/pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-stdio-6e56cf.svg)](https://modelcontextprotocol.io)
 
@@ -357,9 +357,8 @@ and an early CC0-1.0 architecture sketch,
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Trademark and affiliation notes are in
-[NOTICE](NOTICE). GitHub may label the license "Other" because LICENSE also
-carries MAGIX and CC0 notes; SPDX options are discussed in
-[docs/LICENSING_OPTIONS.md](docs/LICENSING_OPTIONS.md). VEGAS, VEGAS Pro and
+AGPL-3.0-or-later. See [LICENSE](LICENSE). The NOTICE file has the additional
+permission for the VEGAS Pro host script, the note on versions published
+earlier under MIT, and trademark and affiliation notes. VEGAS, VEGAS Pro and
 MAGIX are trademarks of MAGIX Software GmbH; DaVinci Resolve is a trademark of
 Blackmagic Design.

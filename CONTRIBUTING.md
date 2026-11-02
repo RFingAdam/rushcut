@@ -48,4 +48,4 @@ This is not a MAGIX or Blackmagic product. Keep the disclaimer in
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Do not change the license terms in drive-by PRs.
+AGPL-3.0-or-later. See [LICENSE](LICENSE). By contributing you agree your changes are licensed the same way. Do not change the license terms in drive-by PRs.
