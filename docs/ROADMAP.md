@@ -35,7 +35,9 @@ Pure Python + ffmpeg (no VEGAS):
 - `probe_media` (ffprobe)
 - `detect_scenes` (ffmpeg scene score)
 - `analyze_audio` — windowed RMS/peak spikes
-- `transcribe_media` — optional `faster-whisper`; CUDA if ctranslate2 sees a GPU, else CPU int8; soft-fail if the extra is missing
+- `transcribe_media` / `analyze_transcript` — optional `faster-whisper`; word timestamps; optional speaker diarization (injected turns, stereo L/R, pyannote if installed); slice mode with source-absolute times
+- `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `required_features`, `source_preference` (local recording over platform VOD)
+- `edit_profile.yaml` safeguard fields (`schema: rushcut.profile/v1`) — full schema remains #17
 - `generate_captions` / `burn_captions` — generic SRT + ASS and ffmpeg burn-in
 - File-level `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`
 

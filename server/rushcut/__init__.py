@@ -344,11 +344,34 @@ def analyze_audio(path: str, spike_ratio: float = 2.2, max_spikes: int = 40) -> 
 
 
 @mcp.tool()
-def transcribe_media(path: str, model_size: str = "base", language: str | None = "en") -> dict:
-    """Optional local Whisper (faster-whisper). Uses GPU if ctranslate2 sees CUDA; else CPU. Soft-fails if not installed."""
-    from .analysis.whisper import transcribe_media as _whisper
+def transcribe_media(
+    path: str | None = None,
+    model_size: str = "base",
+    language: str | None = "en",
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    diarize: bool | str = False,
+    words: list[dict[str, Any]] | None = None,
+    turns: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Word-timestamp transcript, optional speaker diarization. Soft-fails if Whisper is missing.
 
-    return _whisper(path, model_size=model_size, language=language)
+    Pass `words` to skip Whisper (cached transcript). `diarize` is false, true/'auto',
+    'stereo' (L/R channels), or 'pyannote' if that extra is installed. Turns may be
+    supplied directly. Slice with start_seconds/end_seconds; times stay source-absolute.
+    """
+    from .analysis.transcript import analyze_transcript as _analyze
+
+    return _analyze(
+        path,
+        words=words,
+        turns=turns,
+        model_size=model_size,
+        language=language,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        diarize=diarize,
+    )
 
 
 @mcp.tool()
@@ -549,6 +572,48 @@ def verify_output(
         expect_audio=expect_audio,
         expect_duration=expect_duration,
     )
+
+
+@mcp.tool()
+def check_output(
+    target: str | None = None,
+    profile: str | None = None,
+    transcript: dict[str, Any] | list | str | None = None,
+    cuts: dict[str, Any] | list | str | None = None,
+    edit: dict[str, Any] | str | None = None,
+    applied_features: list[str] | None = None,
+    sources: list | None = None,
+    available_sources: list | None = None,
+    pad_seconds: float | None = None,
+    mode: str | None = None,
+) -> dict:
+    """Public quality checks: speech boundaries, required features, source preference.
+
+    `rushcut check` is the CLI. Any director can pass a cut list to validate
+    against a transcript (word timestamps + optional speakers).
+    """
+    from .cli import check_output as _check
+
+    return _check(
+        target=target,
+        profile=profile,
+        transcript=transcript,
+        cuts=cuts,
+        edit=edit,
+        applied_features=applied_features,
+        sources=sources,
+        available_sources=available_sources,
+        pad_seconds=pad_seconds,
+        mode=mode,
+    )
+
+
+@mcp.tool()
+def validate_profile(path: str) -> dict:
+    """Validate edit_profile.yaml (required_features, source_preference, quality pad)."""
+    from .profile import validate_profile_file
+
+    return validate_profile_file(path)
 
 
 @mcp.tool()

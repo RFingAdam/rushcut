@@ -16,7 +16,7 @@
 
 Rushcut MCP is a [Model Context Protocol](https://modelcontextprotocol.io)
 server (Python, [FastMCP](https://github.com/jlowin/fastmcp)) that exposes
-**65 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
+**67 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
 Cursor, or anything else that speaks stdio MCP. The same tool names
 (`add_track`, `place_media`, `trim_event`, `set_event_fades`,
 `render_with_preset`, ...) drive whichever backend you select with
@@ -30,8 +30,8 @@ editors.
   (C# host over loopback TCP) or DaVinci Resolve Studio (official scripting
   API), and read the timeline back after every change.
 - **Inspect, edit, verify.** Grounding tools (`probe_media`, `detect_scenes`,
-  `analyze_audio`, optional local Whisper) and render checks
-  (`verify_output`) let the model check its own work.
+  `analyze_audio`, optional local Whisper with word timestamps) and render
+  checks (`verify_output`, `rushcut check`) let the model check its own work.
 
 > **Formerly vegas-director-mcp.** Old import names, `python -m` entry
 > points and console scripts keep working for one release, and MCP tool names
@@ -46,6 +46,7 @@ Blackmagic Design. See [NOTICE](NOTICE).
 - [60-second quickstart](#60-second-quickstart)
 - [Register with your MCP client](#register-with-your-mcp-client)
 - [Tool catalog](#tool-catalog)
+- [Quality checks](#quality-checks)
 - [Example: a headless FFmpeg edit](#example-a-headless-ffmpeg-edit)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
@@ -158,7 +159,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-65 tools, generated from the server's registered tool list. Tool names are
+67 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -174,6 +175,7 @@ reason instead of raising.
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (7) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar` |
 | Analysis, no NLE needed (4) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media` |
+| Quality, no NLE needed (2) | `check_output`, `validate_profile` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
 | Resolve Studio extras (3) | `resolve_create_subtitles`, `resolve_smart_reframe`, `resolve_set_voice_isolation` |
@@ -182,6 +184,102 @@ reason instead of raising.
 Times on the wire are always **seconds** (`start_seconds`, `length_seconds`).
 `length_seconds=-1` means "use the full remaining media length".
 `render_with_preset` knows `vertical` (1080x1920), `1080p` and `4k`.
+
+## Quality checks
+
+Public, deterministic safeguards that any director plugin can run against a
+cut list. They do **not** choose clips; they only reject (or warn on) an
+edit that would chop speech, skip a configured feature, or use a platform
+VOD when a local recording was available.
+
+```bash
+# After pip install -e . in server/
+rushcut check edit.json --profile edit_profile.yaml --transcript transcript.json
+rushcut check out/render.mp4 --profile edit_profile.yaml
+rushcut profile validate edit_profile.yaml
+```
+
+Exit `0` if the gate passes, `2` if a failing check remains, `1` on usage or
+I/O errors. `--mode strict|warn|off` overrides `quality.gate` in the profile.
+`--json` prints the full report.
+
+The same checks are the MCP tool `check_output`. `render_with_preset` also
+runs them when `edit_meta.profile` is set.
+
+### Speech boundaries
+
+`check_speech_boundaries(cuts, words_or_spans, pad_seconds=0.12)` flags any
+in/out/cut that lands strictly inside a speech span dilated by `pad_seconds`.
+A cut exactly at `span.start - pad` or `span.end + pad` is allowed. Pass a
+transcript (`words` with `start_seconds` / `end_seconds`) or energy-based
+speech spans. Configurable in the profile:
+
+```yaml
+quality:
+  speech_boundary: {pad_seconds: 0.12, mode: fail}  # fail | warn | off
+  turn_completeness: {reply_window_seconds: 2.5, mode: warn}
+  gate: strict   # strict | warn | off
+```
+
+If the transcript has speaker labels, turn-completeness warns (by default)
+when a kept turn is followed within `reply_window_seconds` by another
+speaker whose reply is not in the cut list.
+
+### Transcription primitive
+
+`transcribe_media` / `analyze_transcript` return word timestamps for any
+profile. Optional speaker diarization:
+
+- `diarize: false` — words only (default)
+- `diarize: "stereo"` — label `SPEAKER_L` / `SPEAKER_R` from a 2-channel file
+- `diarize: true` / `"auto"` — stereo if possible, else pyannote if installed
+- or pass `turns: [{start_seconds, end_seconds, speaker}]` from any backend
+
+Slice with `start_seconds` / `end_seconds`; returned times stay absolute to
+the source. Long-file chunking, drift checks and caching remain #27; mixed
+mic-vs-mix attribution remains #28; on-screen OCR remains #26; unfinalized
+container repair remains #29.
+
+### `edit_profile.yaml`
+
+A versioned YAML file (`schema: rushcut.profile/v1`). This repo validates the
+safeguard fields; other keys are kept for the rest of the profile schema (#17).
+
+```yaml
+schema: rushcut.profile/v1
+id: example
+required_features:
+  - captions
+  - loudness_normalize
+source_preference:
+  order: [local_recording, platform_vod]
+  on_mismatch: fail          # fail | warn | off
+sources:
+  - {path: recordings/take.mkv, kind: local_recording}
+  - {path: vods/platform.mp4, kind: platform_vod}
+quality:
+  gate: strict
+  speech_boundary: {pad_seconds: 0.12, mode: fail}
+```
+
+`required_features` must show up on the edit (`applied_features`, captions
+block, sidecar artifacts, or `rushcut check --applied captions,...`). A
+feature listed here and then skipped is a gate failure, not a silent omit.
+
+`source_preference` prefers `local_recording` over `platform_vod` when both
+are available. Paths can set `kind` explicitly; otherwise Rushcut classifies
+from generic path hints (`obs`, `recordings/`, `twitch`, `youtube`, `vod`).
+
+Python:
+
+```python
+from rushcut.quality import check_speech_boundaries, run_checks
+from rushcut.analysis.transcript import analyze_transcript
+
+transcript = analyze_transcript(words=words, turns=turns)  # or a media path
+report = check_speech_boundaries(cuts, transcript["words"], pad_seconds=0.12)
+gate = run_checks(edit=edit_json, profile="edit_profile.yaml", transcript=transcript)
+```
 
 ## Example: a headless FFmpeg edit
 
@@ -223,9 +321,9 @@ flowchart LR
     client["MCP client<br/>Claude Code / Desktop / Cursor"] -- "stdio (MCP)" --> server
 
     subgraph server["Rushcut MCP server (Python, FastMCP)"]
-        tools["65 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
+        tools["67 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
         facade --> select{"DIRECTOR_EDITOR"}
-        tools --> analysis["analysis/ + render/<br/>probe, scenes, audio, captions,<br/>file ops, verify, sidecar"]
+        tools --> analysis["analysis/ + render/ + quality/<br/>probe, transcript, captions,<br/>speech boundaries, verify"]
     end
 
     select -- ffmpeg --> ff["FFmpeg backend<br/>in-memory timeline"]
@@ -274,6 +372,7 @@ your MCP client config.
 | `RESOLVE_RENDER_WAIT` | `1800` | Max seconds for a blocking Resolve render. |
 | `NLE_WHISPER_DEVICE` | auto (CUDA if available, else CPU) | Force `cpu` or `cuda` for `transcribe_media`. `VEGAS_WHISPER_DEVICE` also works. |
 | `NLE_WHISPER_COMPUTE` | `float16` on CUDA, `int8` on CPU | faster-whisper compute type. `VEGAS_WHISPER_COMPUTE` also works. |
+| `PYANNOTE_AUTH_TOKEN` / `HF_TOKEN` | unset | Optional Hugging Face token if `diarize=pyannote` is used. |
 
 ## Security
 
@@ -303,6 +402,7 @@ your MCP client config.
 | `-32001 Unauthorized: missing or wrong token` | Make sure the server runs as the same Windows user, or set `VEGAS_HOST_TOKEN` to the contents of `%LOCALAPPDATA%\vegas-director-mcp\token`. |
 | Resolve backend says scripting is unavailable | You need Resolve **Studio** 21.1+ with External scripting = Local. The free edition has no API. See [docs/RESOLVE.md](docs/RESOLVE.md). |
 | `transcribe_media` returns a soft failure | Install the extra: `pip install -e ".[whisper]"`. |
+| `rushcut check` skips speech boundaries | Pass `--transcript transcript.json` (word timestamps) or a media file with audio. |
 | `ModuleNotFoundError: rushcut` after pulling | Re-run `pip install -e .` in `server/.venv` so the new package and console scripts are registered. |
 | `DeprecationWarning: '<old name>' is deprecated` (for example `vegas_director_mcp`) | Harmless (stderr only). Switch your client config to `-m rushcut`. |
 | Transport tools return `unsupported` | Expected on `ffmpeg` and `otio`; there is no playback UI. |
@@ -320,6 +420,9 @@ render with presets, ffprobe verification and sidecars; VEGAS dual-mode host
   listener to match the client transport.
 - More live NLE adapters (survey and candidates in
   [docs/EDITORS.md](docs/EDITORS.md)).
+- Full `rushcut run` pipeline, complete edit-profile schema, and the rest of
+  the quality gate (#17, #20, #22). Speech-boundary / required-features /
+  source-preference checks are already in `rushcut check`.
 
 Full history and non-goals: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -342,7 +445,7 @@ If you change a host method or MCP tool, update
 
 | Path | What |
 |---|---|
-| `server/rushcut/` | FastMCP server, tool facade, backends, analysis, render helpers |
+| `server/rushcut/` | FastMCP server, tool facade, backends, analysis, profile, quality, render helpers |
 | `server/vegas_director_mcp/` and the other legacy alias packages | Deprecated aliases for `rushcut` (one release; see [docs/MIGRATION.md](docs/MIGRATION.md)) |
 | `host/` | VEGAS C# host (`VegasDirectorHost.cs`), Application Extension wrapper, `build.ps1` |
 | `scripts/register_claude.py` | Write a Claude Desktop entry for this checkout (Windows) |
