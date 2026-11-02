@@ -302,6 +302,7 @@ public partial class EntryPoint
         }
         catch (Exception ex)
         {
+            LogHandlerException(req.Method, ex);
             return SoftFail(req.Id, "Internal error: " + ex.Message);
         }
     }
@@ -331,16 +332,22 @@ public partial class EntryPoint
         if (!done.WaitOne(timeoutMs))
             return SoftFail(req.Id, "UI marshal timed out after " + timeoutMs + " ms (VEGAS may still finish the call)");
         if (thrown != null)
+        {
+            LogHandlerException(req.Method, thrown);
             return SoftFail(req.Id, thrown.Message);
+        }
         return result;
     }
 
     // Script Menu runs are wrapped in an UndoBlock by VEGAS automatically
     // (the whole FromVegas call). Application Extensions are not — MAGIX
     // documents that custom-command / extension mutations must create one
-    // themselves. Without it, Project.Tracks.Add / Video.Width / NewProject
+    // themselves. Without it, Project.Tracks.Add / Video.Width
     // raise COM E_UNEXPECTED (0x8000FFFF) even when already on the UI thread.
     // Nested UndoBlocks are valid in script mode.
+    // Do not wrap project.new / project.open: NewProject / OpenProject (and
+    // SaveProject inside SaveOrDiscard) close the current project, and an
+    // UndoBlock on that project raises E_UNEXPECTED (0x8000FFFF).
     private static bool MethodNeedsUndoBlock(string method)
     {
         if (method == null) return false;
@@ -351,6 +358,8 @@ public partial class EntryPoint
             case "project.get_state":
             case "project.get_selected_events":
             case "project.save":
+            case "project.new":
+            case "project.open":
             case "media.list":
             case "render.list_templates":
             case "render.start":
@@ -1570,6 +1579,7 @@ public partial class EntryPoint
         return true;
     }
 
+    // Not undo-wrapped: NewProject closes the current project.
     private string ProjectNew(RpcRequest req)
     {
         string fail;
@@ -1578,6 +1588,7 @@ public partial class EntryPoint
         return RpcResponse.Result(req.Id, "{\"ok\":" + (ok ? "true" : "false") + "}");
     }
 
+    // Not undo-wrapped: NewProject + OpenProject close the current project.
     private string ProjectOpen(RpcRequest req)
     {
         string path = Json.GetString(req.ParamsJson, "path");
@@ -1769,6 +1780,23 @@ public partial class EntryPoint
           .Append(",\"limit\":").Append(limit)
           .Append("}");
         return RpcResponse.Result(req.Id, sb.ToString());
+    }
+
+    private void LogHandlerException(string method, Exception ex)
+    {
+        int hr = 0;
+        try { hr = System.Runtime.InteropServices.Marshal.GetHRForException(ex); }
+        catch
+        {
+            try
+            {
+                System.Runtime.InteropServices.COMException com = ex as System.Runtime.InteropServices.COMException;
+                if (com != null) hr = com.ErrorCode;
+            }
+            catch { }
+        }
+        Log("handler exception method=" + (method ?? "(none)") +
+            " hresult=0x" + hr.ToString("X8") + " " + (ex != null ? ex.Message : ""));
     }
 
     private void Log(string msg)

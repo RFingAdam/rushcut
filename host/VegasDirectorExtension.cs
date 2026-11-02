@@ -6,8 +6,10 @@
 // (see MAGIX VEGAS Pro 22 Scripting FAQs: Application Extensions).
 // InitializeModule starts the TCP host so MCP works without Tools > Scripting.
 // Project writes from this module go through Control.BeginInvoke (UI thread)
-// plus UndoBlock — VEGAS does not wrap extension mutations the way it wraps
-// Script Menu runs, and missing UndoBlock is COM E_UNEXPECTED.
+// plus UndoBlock for track/event/media mutations — VEGAS does not wrap
+// extension edits the way it wraps Script Menu runs, and a missing
+// UndoBlock is COM E_UNEXPECTED. project.new / project.open are not
+// wrapped; an UndoBlock on the project being closed is also E_UNEXPECTED.
 
 using System;
 using System.Collections;

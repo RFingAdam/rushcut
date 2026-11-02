@@ -87,7 +87,8 @@ run it from the Scripting menu.
 
 Script-menu mode does **not** require the token.
 
-Logs for both modes: `%LOCALAPPDATA%\vegas-director-mcp\host.log`.
+Logs for both modes: `%LOCALAPPDATA%\vegas-director-mcp\host.log`
+(connections plus uncaught handler exceptions with method and HRESULT).
 
 The current host does **not** open `\\.\pipe\vegas-director`. If you
 re-copy the `.cs` file after a git pull, close the old dialog (or restart
@@ -209,11 +210,13 @@ back to `.dll`. Re-run `host\build.ps1` (confirm the printed Documents
 path is the OneDrive folder if this PC redirects Documents). Start VEGAS
 again.
 
-Extension-mode **writes** (new project, add track, set video, place an
-event) need this rebuilt DLL: VEGAS does not wrap Application Extension
+Extension-mode **track/event/video writes** (add track, set video, place
+an event) need this rebuilt DLL: VEGAS does not wrap Application Extension
 edits in an undo transaction the way it wraps *Tools > Scripting*, so
-the host now creates an `UndoBlock` on the UI thread. Reads already
-worked; old DLLs still fail writes with `E_UNEXPECTED`.
+the host creates an `UndoBlock` on the UI thread for those mutations.
+`project.new` / `project.open` are not wrapped — an undo block on the
+project being closed is `E_UNEXPECTED`. Reads already worked; old DLLs
+still fail writes with `E_UNEXPECTED`.
 
 **Script Menu:**
 

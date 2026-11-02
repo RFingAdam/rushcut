@@ -116,12 +116,17 @@ with a WinForms control (`Control.BeginInvoke`). Ordinary calls wait
 wait 30 minutes. Callers do not marshal.
 
 VEGAS wraps a Script Menu run in an `UndoBlock` automatically.
-Application Extensions do **not**. Project mutations from extension
-mode (`track.add`, `project.new`, `project.set_video`, event/media
-edits, …) are therefore wrapped in `new UndoBlock("Vegas Director: …")`
-on that UI thread. Without it, VEGAS raises COM `E_UNEXPECTED`
-(`0x8000FFFF`) even though reads succeed. Nested undo blocks are valid
-in script mode. Render / transport / save / list calls are not wrapped.
+Application Extensions do **not**. Track / event / media / video-property
+mutations from extension mode (`track.add`, `project.set_video`,
+event/media edits, …) are therefore wrapped in
+`new UndoBlock("Vegas Director: …")` on that UI thread. Without it,
+VEGAS raises COM `E_UNEXPECTED` (`0x8000FFFF`) even though reads
+succeed. Nested undo blocks are valid in script mode. Render /
+transport / save / list / `project.new` / `project.open` are not
+wrapped — `NewProject` / `OpenProject` close the current project, so an
+undo block on that project is `E_UNEXPECTED`. Uncaught handler
+exceptions are written to `%LOCALAPPDATA%\vegas-director-mcp\host.log`
+with the method name and HRESULT.
 
 ## Timecodes
 
