@@ -439,14 +439,39 @@ def render_with_preset(
             expect_duration=length_seconds,
         )
         sidecar = write_sidecar(output_path, edit_meta, extra={"preset": preset, "verify": verify})
+    quality = None
+    profile_spec = (edit_meta or {}).get("profile")
+    if wait and profile_spec:
+        from .quality import run_checks
+
+        try:
+            quality = run_checks(
+                target=output_path,
+                profile=profile_spec,
+                transcript=(edit_meta or {}).get("transcript"),
+                cuts=(edit_meta or {}).get("cuts") or (edit_meta or {}).get("edit"),
+                edit=(edit_meta or {}).get("edit"),
+                applied_features=(edit_meta or {}).get("applied_features"),
+                sources=(edit_meta or {}).get("sources"),
+            )
+        except (OSError, ValueError) as exc:
+            quality = {"ok": False, "error": str(exc)}
+        if sidecar and sidecar.get("sidecar_path"):
+            extra = dict((sidecar.get("extra") or {}))
+            extra["quality"] = quality
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+    ok = bool(status.get("ok"))
+    if quality is not None and not quality.get("ok"):
+        ok = False
     return {
-        "ok": bool(status.get("ok")),
+        "ok": ok,
         "used_mode": started.get("used_mode") or status.get("used_mode"),
         "preset": matched,
         "started": started,
         "status": status,
         "verify": verify,
         "sidecar": sidecar,
+        "quality": quality,
         "output_path": output_path,
     }
 

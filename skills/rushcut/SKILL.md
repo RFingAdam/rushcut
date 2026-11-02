@@ -15,8 +15,10 @@ edits.
 ## Typical flow
 
 1. `probe_media` on the source.
-2. Optional: `detect_scenes`, `analyze_audio`, `transcribe_media`.
+2. Optional: `detect_scenes`, `analyze_audio`, `transcribe_media`
+   (word timestamps; optional `diarize` or injected speaker `turns`).
 3. Decide in/out points yourself (this skill does not rank clips).
+   Validate them with `check_output` / `rushcut check` before render.
 4. `cut_media` / `concat_media` / `reframe_media` for file-level jobs, **or**
    build a timeline:
    - `new_project` or `open_project`
@@ -26,12 +28,20 @@ edits.
    - `apply_crossfade` on joins; `apply_ducking` for music under voice
    - `generate_captions` then `burn_captions`, or `add_title`
 5. `render_with_preset` (`1080p`, `vertical`, `4k`) or `render_start`.
-6. `verify_output` on the file.
+6. `verify_output` on the file, then `check_output` (or `rushcut check`)
+   with the profile, transcript, and cut list. Speech-boundary, required
+   features, and source-preference failures are not silent.
 
 ## Guardrails
 
 - Times are seconds, not ticks.
 - Soft failures are `{ok: false, error}` — never assume success.
+- Do not cut inside a word. Snap in/out to silence with the profile pad
+  (`quality.speech_boundary.pad_seconds`). Keep a conversation partner's
+  reply if it starts within `turn_completeness.reply_window_seconds`.
+- Prefer `local_recording` over `platform_vod` when both exist.
+- Honor `required_features` from `edit_profile.yaml`; record what you
+  applied on the edit (`applied_features`) so `check_output` can verify.
 - `find_highlights`, `apply_vertical_short`, and `propose_edit` are removed
   stubs. Do not call them for real work.
 - VEGAS extension mode needs `%LOCALAPPDATA%\vegas-director-mcp\token`.

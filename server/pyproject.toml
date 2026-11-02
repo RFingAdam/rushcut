@@ -7,6 +7,7 @@ license = { text = "AGPL-3.0-or-later" }
 dependencies = [
     "fastmcp>=0.4.0",
     "pydantic>=2.0",
+    "pyyaml>=6.0",
     # analyze_audio uses audioop, which left the stdlib in Python 3.13.
     "audioop-lts>=0.2.1; python_version >= '3.13'",
 ]
@@ -18,6 +19,7 @@ Issues = "https://github.com/RFingAdam/rushcut/issues"
 Documentation = "https://github.com/RFingAdam/rushcut#readme"
 
 [project.scripts]
+rushcut = "rushcut.cli:main"
 rushcut-mcp = "rushcut:main"
 # Deprecated aliases, kept for one release.
 cutrelay-mcp = "rushcut:main"

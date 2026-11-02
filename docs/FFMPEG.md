@@ -34,7 +34,8 @@ File-level tools (no timeline required):
 | `mix_audio` | mix audio streams |
 | `normalize_audio` | ffmpeg `loudnorm` |
 | `generate_captions` / `burn_captions` | SRT + ASS, optional burn-in |
-| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding |
+| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize) |
+| `check_output` / `rushcut check` | speech-boundary, required features, source preference |
 
 ## Example (headless cut)
 
