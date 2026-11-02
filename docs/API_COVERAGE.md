@@ -5,8 +5,9 @@ Legend: ✅ implemented in host · 🟨 partial / best-effort · ⬜ not started
 Based on Magix VEGAS Pro 22 Scripting FAQ patterns (Tracks/Events, Envelopes,
 Generators, VideoMotion, RenderArgs) and the Application Extensions FAQ
 (`ICustomCommandModule`, Known Folder `Documents\Vegas Application Extensions`,
-including OneDrive-redirected Documents). Extension-mode writes run inside
-an `UndoBlock` on the UI thread.
+including OneDrive-redirected Documents). Extension-mode track/event/media
+writes run inside an `UndoBlock` on the UI thread; `project.new` /
+`project.open` do not (they close the current project).
 
 | Area | MCP / RPC | Status |
 |---|---|---|
