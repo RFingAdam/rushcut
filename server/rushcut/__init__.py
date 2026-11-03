@@ -777,9 +777,17 @@ def check_output(
     must_include: list | dict | str | None = None,
     loop: bool = False,
     check_media_output: bool = False,
+    envelope: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    window_ms: float | None = None,
+    voiced_threshold_db: float | None = None,
+    ramp_pad_seconds: float | None = None,
+    word_confidence_min: float | None = None,
+    shift_ramps: bool = False,
 ) -> dict:
     """Public quality checks: speech boundaries, required features, source preference,
-    required-event coverage, optional loop-seam and check_media on the render.
+    required-event coverage, seam scoring, speed-ramp speech guard, optional
+    loop-seam and check_media on the render.
 
     `rushcut check` is the CLI. Any director can pass a cut list to validate
     against a transcript (word timestamps + optional speakers).
@@ -800,6 +808,93 @@ def check_output(
         must_include=must_include,
         loop=loop,
         check_media_output=check_media_output,
+        envelope=envelope,
+        mic_audio=mic_audio,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        ramp_pad_seconds=ramp_pad_seconds,
+        word_confidence_min=word_confidence_min,
+        shift_ramps=shift_ramps,
+    )
+
+
+@mcp.tool()
+def check_seams(
+    cuts: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    envelope: dict[str, Any] | list | str | None = None,
+    words: dict[str, Any] | list | None = None,
+    window_ms: float = 300.0,
+    voiced_threshold_db: float = -32.0,
+    fade_seconds: float = 0.04,
+    keep_words: bool = True,
+    max_shift_ms: float | None = None,
+    mode: str = "fail",
+) -> dict:
+    """Score every cut against the mic envelope and word timestamps. Returns per-seam JSON plus a markdown table."""
+    from .quality.seams import check_seams as _seams
+
+    return _seams(
+        cuts,
+        mic_audio=mic_audio,
+        envelope=envelope,
+        words=words,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        fade_seconds=fade_seconds,
+        keep_words=keep_words,
+        max_shift_ms=max_shift_ms,
+        mode=mode,
+    )
+
+
+@mcp.tool()
+def snap_cuts(
+    cuts: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    envelope: dict[str, Any] | list | str | None = None,
+    words: dict[str, Any] | list | None = None,
+    window_ms: float = 300.0,
+    voiced_threshold_db: float = -32.0,
+    max_shift_ms: float | None = None,
+    keep_words: bool = True,
+    max_total_seconds: float | None = None,
+) -> dict:
+    """Snap voiced seams to the nearest envelope dip without dropping covered words or exceeding a length cap."""
+    from .quality.seams import snap_cuts as _snap
+
+    return _snap(
+        cuts,
+        mic_audio=mic_audio,
+        envelope=envelope,
+        words=words,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        max_shift_ms=max_shift_ms,
+        keep_words=keep_words,
+        max_total_seconds=max_total_seconds,
+    )
+
+
+@mcp.tool()
+def check_speed_ramps(
+    spec: dict[str, Any] | list | None = None,
+    words: dict[str, Any] | list | None = None,
+    pad_seconds: float = 0.08,
+    confidence_min: float = 0.0,
+    shift: bool = False,
+    mode: str = "fail",
+) -> dict:
+    """Flag speed-ramp steps (1/2/4/6x) that overlap a word timestamp. Pad default 80 ms. Bleeped words count."""
+    from .quality.ramps import check_speed_ramps as _ramps
+
+    return _ramps(
+        spec,
+        words=words,
+        pad_seconds=pad_seconds,
+        confidence_min=confidence_min,
+        shift=shift,
+        mode=mode,
     )
 
 

@@ -160,7 +160,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-76 tools, generated from the server's registered tool list. Tool names are
+79 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -176,7 +176,7 @@ reason instead of raising.
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (7) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar` |
 | Analysis, no NLE needed (7) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
-| Quality, no NLE needed (4) | `check_output`, `validate_profile`, `check_loop`, `check_media` |
+| Quality, no NLE needed (7) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
 | File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
@@ -199,6 +199,9 @@ VOD when a local recording was available.
 rushcut check edit.json --profile edit_profile.yaml --transcript transcript.json
 rushcut check edit.json --must-include '[{"t":12,"pre":1,"post":1,"id":"event_a"}]'
 rushcut check out/render.mp4 --profile edit_profile.yaml --loop --check-media
+rushcut check edit.json --envelope envelope.json --transcript transcript.json
+rushcut check-seams --cuts cuts.json --mic-audio mic.wav --transcript transcript.json
+rushcut snap-cuts --cuts cuts.json --envelope envelope.json --max-total-seconds 30
 rushcut check-loop out/short.mp4
 rushcut check-media out/render.mp4 --cuts cuts.json
 rushcut stitch-session rec1.mkv rec2.mkv rec3.mkv rec4.mkv --output session.mkv
@@ -225,6 +228,8 @@ speech spans. Configurable in the profile:
 quality:
   speech_boundary: {pad_seconds: 0.12, mode: fail}  # fail | warn | off
   turn_completeness: {reply_window_seconds: 2.5, mode: warn}
+  seams: {window_ms: 300, voiced_threshold_db: -32, mode: warn}
+  speed_ramps: {pad_seconds: 0.08, confidence_min: 0.0, mode: fail}
   gate: strict   # strict | warn | off
 ```
 
@@ -237,6 +242,21 @@ required event's `[t-pre, t+post]` window is not on the cut timeline.
 `check_loop` reports SSIM of the last frames vs frame 1 and the dB jump
 across the audio wrap. `check_media` returns integrated LUFS, true peak,
 duration and fps, and re-checks speech boundaries on the render.
+
+`check_seams` scores every in/out against a mic envelope (audio file or
+`[{at_seconds, dbfs}]`) and word timestamps: dBFS at the cut, local
+minimum within `window_ms` (default 300), mid-word and voiced flags
+(envelope above −32 dBFS), fade length, and a snap suggestion. The
+report is per-seam JSON plus a markdown table; unresolvable voiced
+seams are listed as "listen here" with the source time. `snap_cuts`
+applies those suggestions without dropping a word whose timestamp was
+inside the original span, and refuses to apply if the result would
+exceed `max_total_seconds`.
+
+`check_speed_ramps` flags any ramp step with speed ≠ 1 that covers a
+word timestamp (including profanity-bleeped words). Stepped ramps
+(1/2/4/6x) are reported individually. Pad defaults to 80 ms; pass
+`shift=True` to move the ramp end to `word.start - pad`.
 
 ### Transcription primitive
 

@@ -13,9 +13,11 @@ from .model import (
     EditProfile,
     GateMode,
     QualitySettings,
+    SeamsSettings,
     SourceItem,
     SourcePreference,
     SpeechBoundarySettings,
+    SpeedRampSettings,
     TurnCompletenessSettings,
 )
 
@@ -24,9 +26,11 @@ __all__ = [
     "EditProfile",
     "GateMode",
     "QualitySettings",
+    "SeamsSettings",
     "SourceItem",
     "SourcePreference",
     "SpeechBoundarySettings",
+    "SpeedRampSettings",
     "TurnCompletenessSettings",
     "load_profile",
     "profile_from_data",

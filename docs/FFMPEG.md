@@ -38,7 +38,9 @@ File-level tools (no timeline required):
 | `normalize_audio` | ffmpeg `loudnorm` |
 | `generate_captions` / `burn_captions` | SRT + ASS, optional burn-in |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize) |
-| `check_output` / `rushcut check` | speech-boundary, must_include, required features, source preference |
+| `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference |
+| `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |
+| `check_speed_ramps` | flag speed ≠ 1 steps that cover a word |
 | `check_loop` / `rushcut check-loop` | SSIM last vs first, audio wrap |
 | `check_media` / `rushcut check-media` | LUFS, true peak, duration, fps, chopped words on the render |
 

@@ -36,7 +36,7 @@ Pure Python + ffmpeg (no VEGAS):
 - `detect_scenes` (ffmpeg scene score)
 - `analyze_audio` — windowed RMS/peak spikes
 - `transcribe_media` / `analyze_transcript` — optional `faster-whisper`; word timestamps; optional speaker diarization (injected turns, stereo L/R, pyannote if installed); slice mode with source-absolute times
-- `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `must_include`, `required_features`, `source_preference` (local recording over platform VOD)
+- `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `must_include`, `required_features`, `source_preference` (local recording over platform VOD), `check_seams` / `snap_cuts`, speed-ramp speech guard
 - `stitch_session` / `detect_region_presence` / `check_loop` / `check_media`
 - `edit_profile.yaml` safeguard fields (`schema: rushcut.profile/v1`) — full schema remains #17
 - `generate_captions` / `burn_captions` — generic SRT + ASS and ffmpeg burn-in

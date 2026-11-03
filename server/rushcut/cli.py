@@ -16,7 +16,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Rushcut CLI. Quality checks: `rushcut check`. "
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
-            "`check-media`, `check-loop`. Story: `list-story-formats`, "
+            "`check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
             "`plan-story-edit`, `measure-pacing`. "
             "The MCP server is `rushcut-mcp` (or python -m rushcut with no args)."
         ),
@@ -76,7 +76,30 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="check_media_output",
         help="Also run check_media (LUFS, duration, fps, chopped words on the render)",
     )
+    check.add_argument("--envelope", help="Mic envelope JSON or audio path")
+    check.add_argument("--mic-audio", dest="mic_audio", help="Isolated mic audio for seam scoring")
     check.add_argument("--json", action="store_true", dest="as_json", help="Print JSON report")
+
+    seams = sub.add_parser("check-seams", help="Score each cut against the mic envelope and word times")
+    seams.add_argument("--cuts", required=True, help="JSON cut list or edit.json")
+    seams.add_argument("--envelope", help="Envelope JSON ([{at_seconds, dbfs}])")
+    seams.add_argument("--mic-audio", dest="mic_audio", help="Mic audio to build an envelope from")
+    seams.add_argument("--transcript", help="transcript JSON (words)")
+    seams.add_argument("--window-ms", type=float, default=300.0)
+    seams.add_argument("--voiced-threshold-db", type=float, default=-32.0)
+    seams.add_argument("--json", action="store_true", dest="as_json")
+
+    snap = sub.add_parser("snap-cuts", help="Snap voiced seams to the nearest envelope dip")
+    snap.add_argument("--cuts", required=True, help="JSON cut list or edit.json")
+    snap.add_argument("--envelope", help="Envelope JSON")
+    snap.add_argument("--mic-audio", dest="mic_audio")
+    snap.add_argument("--transcript", help="transcript JSON (words)")
+    snap.add_argument("--window-ms", type=float, default=300.0)
+    snap.add_argument("--max-shift-ms", type=float, default=None)
+    snap.add_argument("--max-total-seconds", type=float, default=None)
+    snap.add_argument("--keep-words", action="store_true", default=True)
+    snap.add_argument("--no-keep-words", dest="keep_words", action="store_false")
+    snap.add_argument("--json", action="store_true", dest="as_json")
 
     loop = sub.add_parser("check-loop", help="SSIM last frames vs frame 1, plus audio-level continuity")
     loop.add_argument("file")
@@ -153,6 +176,17 @@ def _split_csv(value: str | None) -> list[str] | None:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def _envelope_arg(value: str | None) -> Any:
+    if value is None:
+        return None
+    from pathlib import Path
+
+    path = Path(value)
+    if path.is_file() and path.suffix.lower() in {".json", ".yaml", ".yml"}:
+        return _load_json_arg(value)
+    return value
+
+
 def _load_json_arg(value: str | None) -> Any:
     if value is None:
         return None
@@ -187,6 +221,8 @@ def _cmd_check(args: argparse.Namespace) -> int:
             must_include=_load_json_arg(args.must_include),
             loop=bool(args.loop),
             check_media_output=bool(args.check_media_output),
+            envelope=_envelope_arg(args.envelope),
+            mic_audio=args.mic_audio,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"rushcut check: error: {exc}", file=sys.stderr)
@@ -211,6 +247,53 @@ def _cmd_check_loop(args: argparse.Namespace) -> int:
     result = check_loop(args.file, **kwargs)
     _print_json(result)
     if not result.get("ok") or not result.get("pass"):
+        return 2
+    return 0
+
+
+def _cmd_check_seams(args: argparse.Namespace) -> int:
+    from .quality.seams import check_seams
+
+    try:
+        result = check_seams(
+            _load_json_arg(args.cuts),
+            mic_audio=args.mic_audio,
+            envelope=_envelope_arg(args.envelope),
+            words=_load_json_arg(args.transcript),
+            window_ms=args.window_ms,
+            voiced_threshold_db=args.voiced_threshold_db,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"rushcut check-seams: error: {exc}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        _print_json(result)
+    else:
+        sys.stdout.write(str(result.get("markdown") or "") or json.dumps(result, indent=2) + "\n")
+    if not result.get("pass"):
+        return 2
+    return 0
+
+
+def _cmd_snap_cuts(args: argparse.Namespace) -> int:
+    from .quality.seams import snap_cuts
+
+    try:
+        result = snap_cuts(
+            _load_json_arg(args.cuts),
+            mic_audio=args.mic_audio,
+            envelope=_envelope_arg(args.envelope),
+            words=_load_json_arg(args.transcript),
+            window_ms=args.window_ms,
+            max_shift_ms=args.max_shift_ms,
+            keep_words=bool(args.keep_words),
+            max_total_seconds=args.max_total_seconds,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"rushcut snap-cuts: error: {exc}", file=sys.stderr)
+        return 1
+    _print_json(result)
+    if not result.get("ok"):
         return 2
     return 0
 
@@ -344,6 +427,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_check_loop(args)
     if args.cmd == "check-media":
         return _cmd_check_media(args)
+    if args.cmd == "check-seams":
+        return _cmd_check_seams(args)
+    if args.cmd == "snap-cuts":
+        return _cmd_snap_cuts(args)
     if args.cmd == "stitch-session":
         return _cmd_stitch(args)
     if args.cmd == "detect-region-presence":
@@ -376,6 +463,13 @@ def check_output(
     must_include: Any = None,
     loop: bool = False,
     check_media_output: bool = False,
+    envelope: Any = None,
+    mic_audio: Any = None,
+    window_ms: float | None = None,
+    voiced_threshold_db: float | None = None,
+    ramp_pad_seconds: float | None = None,
+    word_confidence_min: float | None = None,
+    shift_ramps: bool = False,
 ) -> dict[str, Any]:
     """Library/MCP facade for `rushcut check`."""
     try:
@@ -393,6 +487,13 @@ def check_output(
             must_include=must_include,
             loop=loop,
             check_media_output=check_media_output,
+            envelope=envelope,
+            mic_audio=mic_audio,
+            window_ms=window_ms,
+            voiced_threshold_db=voiced_threshold_db,
+            ramp_pad_seconds=ramp_pad_seconds,
+            word_confidence_min=word_confidence_min,
+            shift_ramps=shift_ramps,
         )
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}

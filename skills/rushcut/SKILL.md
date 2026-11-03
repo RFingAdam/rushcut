@@ -69,8 +69,12 @@ These tools never rank footage; you choose the beats.
 - Times are seconds, not ticks.
 - Soft failures are `{ok: false, error}` — never assume success.
 - Do not cut inside a word. Snap in/out to silence with the profile pad
-  (`quality.speech_boundary.pad_seconds`). Keep a conversation partner's
+  (`quality.speech_boundary.pad_seconds`). `check_seams` / `snap_cuts`
+  score the mic envelope and move voiced seams to the nearest dip
+  without dropping covered words. Keep a conversation partner's
   reply if it starts within `turn_completeness.reply_window_seconds`.
+- Do not let a speed ramp (speed ≠ 1) cover a word. `check_speed_ramps`
+  flags each 1/2/4/6x step; pad defaults to 80 ms. Bleeped words count.
 - Prefer `local_recording` over `platform_vod` when both exist.
 - Honor `required_features` from `edit_profile.yaml`; record what you
   applied on the edit (`applied_features`) so `check_output` can verify.
