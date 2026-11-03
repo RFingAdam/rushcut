@@ -9,14 +9,17 @@ footage: the caller supplies the beats.
 from .library import format_ids, get_story_format, list_story_formats, load_library
 from .planner import (
     chapters_from_beats,
+    fits_cap,
     format_timestamp,
     parse_value,
     plan_story_edit,
+    predicted_output_seconds,
     validate_chapters,
 )
 
 __all__ = [
     "chapters_from_beats",
+    "fits_cap",
     "format_ids",
     "format_timestamp",
     "get_story_format",
@@ -24,5 +27,6 @@ __all__ = [
     "load_library",
     "parse_value",
     "plan_story_edit",
+    "predicted_output_seconds",
     "validate_chapters",
 ]

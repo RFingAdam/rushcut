@@ -13,6 +13,7 @@ from .model import (
     EditProfile,
     GateMode,
     QualitySettings,
+    ShortsSettings,
     SourceItem,
     SourcePreference,
     SpeechBoundarySettings,
@@ -24,6 +25,7 @@ __all__ = [
     "EditProfile",
     "GateMode",
     "QualitySettings",
+    "ShortsSettings",
     "SourceItem",
     "SourcePreference",
     "SpeechBoundarySettings",
@@ -88,6 +90,8 @@ def validate_profile_file(path: str | os.PathLike[str]) -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc), "path": str(path)}
     payload = profile.model_dump(by_alias=True)
+    from ..output_roots import effective_output_roots
+
     return {
         "ok": True,
         "path": os.path.abspath(str(path)),
@@ -95,4 +99,6 @@ def validate_profile_file(path: str | os.PathLike[str]) -> dict[str, Any]:
         "id": profile.id,
         "required_features": list(profile.required_features),
         "source_preference": profile.source_preference.model_dump(),
+        "output_roots": effective_output_roots(profile),
+        "shorts": profile.shorts.model_dump() if profile.shorts else None,
     }

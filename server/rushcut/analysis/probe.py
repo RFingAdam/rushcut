@@ -7,6 +7,53 @@ from typing import Any
 from .ffmpeg_util import FfmpegError, ffprobe_json
 
 
+def _stream_duration(stream: dict[str, Any]) -> float | None:
+    """Duration of one stream, preferring tagged duration then frames/fps."""
+    raw = stream.get("duration")
+    if raw not in (None, "", "N/A"):
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    tags = stream.get("tags") or {}
+    for key in ("DURATION", "duration"):
+        tagged = tags.get(key)
+        if tagged not in (None, "", "N/A"):
+            parsed = _parse_clock(tagged)
+            if parsed is not None:
+                return parsed
+    frames = stream.get("nb_frames")
+    fps = _fps(stream)
+    if frames not in (None, "", "N/A") and fps:
+        try:
+            count = float(frames)
+        except (TypeError, ValueError):
+            count = 0.0
+        if count > 0:
+            return count / fps
+    return None
+
+
+def _parse_clock(value: Any) -> float | None:
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    parts = text.split(":")
+    if len(parts) == 3:
+        try:
+            hours, minutes, seconds = float(parts[0]), float(parts[1]), float(parts[2])
+        except ValueError:
+            return None
+        return hours * 3600 + minutes * 60 + seconds
+    return None
+
+
 def _fps(stream: dict[str, Any]) -> float | None:
     for key in ("avg_frame_rate", "r_frame_rate"):
         raw = stream.get(key) or ""
@@ -46,28 +93,33 @@ def probe_media(path: str) -> dict[str, Any]:
     except (TypeError, ValueError):
         duration = 0.0
         header_duration_missing = True
+    format_duration = None if header_duration_missing else duration
 
     video = None
     audio = None
     duration_estimated = False
+    stream_durations: list[float] = []
     for stream in data.get("streams") or []:
         if stream.get("codec_type") == "video" and video is None:
             video = stream
         elif stream.get("codec_type") == "audio" and audio is None:
             audio = stream
-        if duration <= 0 and stream.get("duration") not in (None, "", "N/A"):
-            try:
-                stream_dur = float(stream["duration"])
-            except (TypeError, ValueError):
-                stream_dur = 0.0
-            if stream_dur > duration:
+        stream_dur = _stream_duration(stream)
+        if stream_dur is not None:
+            stream_durations.append(stream_dur)
+            if duration <= 0 and stream_dur > duration:
                 duration = stream_dur
                 duration_estimated = True
+
+    stream_max = max(stream_durations) if stream_durations else duration
 
     result: dict[str, Any] = {
         "ok": True,
         "path": os.path.abspath(path),
-        "duration_seconds": duration,
+        "duration_seconds": stream_max if stream_max else duration,
+        "format_duration_seconds": format_duration,
+        "stream_durations": stream_durations,
+        "stream_max_duration_seconds": stream_max,
         "size_bytes": int(fmt.get("size") or 0) if str(fmt.get("size") or "").isdigit() else None,
         "format_name": fmt.get("format_name"),
         "has_video": video is not None,

@@ -94,6 +94,26 @@ class QualitySettings(BaseModel):
         return _coerce_mode(value)
 
 
+class ShortsSettings(BaseModel):
+    """YouTube Shorts delivery: hard duration cap and seamless-loop checks."""
+
+    model_config = ConfigDict(extra="allow")
+    max_seconds: float = 30.0
+    loop: bool = True
+    ssim_min: float = 0.85
+    psnr_min: float = 20.0
+    audio_jump_db: float = 6.0
+    sample_step: float = 0.5
+    black_luma: float = 16.0
+
+    @field_validator("max_seconds")
+    @classmethod
+    def _max_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("shorts.max_seconds: must be > 0")
+        return value
+
+
 class EditProfile(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
     schema_name: str = Field(default="rushcut.profile/v1", alias="schema")
@@ -103,6 +123,8 @@ class EditProfile(BaseModel):
     source_preference: SourcePreference = Field(default_factory=SourcePreference)
     sources: list[SourceItem] = Field(default_factory=list)
     quality: QualitySettings = Field(default_factory=QualitySettings)
+    shorts: ShortsSettings | None = None
+    output_roots: list[str] = Field(default_factory=list)
 
     @field_validator("required_features")
     @classmethod

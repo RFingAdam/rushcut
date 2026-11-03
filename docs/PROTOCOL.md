@@ -103,7 +103,7 @@ over the RPC names above. See [API_COVERAGE.md](API_COVERAGE.md).
 Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
 `transcribe_media`, `check_output`, `validate_profile`, `generate_captions`, `burn_captions`, `cut_media`,
 `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`,
-`verify_output`. Helpers `apply_crossfade` / `apply_ducking` /
+`verify_output`, `export_review_pack`, `fits_cap`. Helpers `apply_crossfade` / `apply_ducking` /
 `render_with_preset` compose the RPCs above. The FFmpeg backend implements
 the same RPC names and encodes on `render.start`.
 

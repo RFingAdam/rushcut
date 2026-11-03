@@ -43,6 +43,31 @@ intent: "tighten pauses; keep replies"
     assert dumped.get("intent")
 
 
+def test_shorts_and_output_roots_roundtrip(tmp_path):
+    path = tmp_path / "edit_profile.yaml"
+    path.write_text(
+        """
+schema: rushcut.profile/v1
+id: shorts
+shorts:
+  max_seconds: 30.0
+  loop: true
+output_roots:
+  - D:\\\\MediaOut
+""",
+        encoding="utf-8",
+    )
+    profile = load_profile(path)
+    assert profile.shorts is not None
+    assert profile.shorts.max_seconds == 30.0
+    assert profile.shorts.loop is True
+    assert profile.output_roots
+    checked = validate_profile_file(path)
+    assert checked["ok"] is True
+    assert checked["shorts"]["max_seconds"] == 30.0
+    assert checked["output_roots"]
+
+
 def test_secret_keys_rejected():
     with pytest.raises(ValueError, match="secrets are not allowed"):
         profile_from_data({"id": "x", "openai_api_key": "sk-nope"})

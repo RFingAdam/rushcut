@@ -17,7 +17,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Rushcut CLI. Quality checks: `rushcut check`. "
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
             "`check-media`, `check-loop`. Story: `list-story-formats`, "
-            "`plan-story-edit`, `measure-pacing`. "
+            "`plan-story-edit`, `measure-pacing`, `fits-cap`. "
+            "Review: `export-review-pack`. "
             "The MCP server is `rushcut-mcp` (or python -m rushcut with no args)."
         ),
     )
@@ -144,6 +145,23 @@ def _build_parser() -> argparse.ArgumentParser:
     validate = profile_sub.add_parser("validate", help="Validate and print the profile")
     validate.add_argument("path")
     validate.add_argument("--json", action="store_true", dest="as_json")
+
+    pack = sub.add_parser(
+        "export-review-pack",
+        help="Write 720p proxies, contact sheets, and QA.md into a review directory",
+    )
+    pack.add_argument("outputs", nargs="+")
+    pack.add_argument("--dest", required=True)
+    pack.add_argument("--proxy", default="720p")
+    pack.add_argument("--chunk-mb", type=float, default=None)
+    pack.add_argument("--profile", default=None)
+    pack.add_argument("--json", action="store_true", dest="as_json")
+
+    cap = sub.add_parser("fits-cap", help="Predict output duration from a segment spec")
+    cap.add_argument("spec", help="JSON file or inline JSON segment spec")
+    cap.add_argument("--max", type=float, default=None, dest="max_seconds")
+    cap.add_argument("--fps", type=float, default=None)
+    cap.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -358,8 +376,39 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_pacing(args)
     if args.cmd == "profile":
         return _cmd_profile(args)
+    if args.cmd == "export-review-pack":
+        return _cmd_export_review_pack(args)
+    if args.cmd == "fits-cap":
+        return _cmd_fits_cap(args)
     parser.print_help()
     return 1
+
+
+def _cmd_export_review_pack(args: argparse.Namespace) -> int:
+    from .render.review_pack import export_review_pack
+
+    result = export_review_pack(
+        args.outputs,
+        args.dest,
+        proxy=args.proxy,
+        chunk_mb=args.chunk_mb,
+        profile=args.profile,
+    )
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
+def _cmd_fits_cap(args: argparse.Namespace) -> int:
+    from .formats import fits_cap
+
+    try:
+        spec = _load_json_arg(args.spec)
+    except json.JSONDecodeError as exc:
+        print(f"rushcut fits-cap: error: {exc}", file=sys.stderr)
+        return 1
+    result = fits_cap(spec, max_seconds=args.max_seconds, fps=args.fps)
+    _print_json(result)
+    return 0 if result.get("ok") and result.get("fits") else 2
 
 
 def check_output(
