@@ -619,6 +619,19 @@ def render_with_preset(
     }
 
 
+def export_review_pack(
+    outputs: list[str] | str,
+    dest: str,
+    proxy: str = "720p",
+    chunk_mb: float | None = None,
+    profile: Any = None,
+) -> dict:
+    """Write 720p/1 Mbps proxies, contact sheets, and QA into dest. Finals are only read."""
+    from .render.review_pack import export_review_pack as _export
+
+    return _export(outputs, dest, proxy=proxy, chunk_mb=chunk_mb, profile=profile)
+
+
 def transport_play() -> dict:
     return _call("transport.play")
 

@@ -14,6 +14,7 @@ from .model import (
     GateMode,
     QualitySettings,
     SeamsSettings,
+    ShortsSettings,
     SourceItem,
     SourcePreference,
     SpeechBoundarySettings,
@@ -27,6 +28,7 @@ __all__ = [
     "GateMode",
     "QualitySettings",
     "SeamsSettings",
+    "ShortsSettings",
     "SourceItem",
     "SourcePreference",
     "SpeechBoundarySettings",
@@ -108,4 +110,5 @@ def validate_profile_file(path: str | os.PathLike[str]) -> dict[str, Any]:
         "output_policy": snapshot["output_policy"],
         "output_roots_source": snapshot["output_roots_source"],
         "stale_partials": report_stale_partials(),
+        "shorts": profile.shorts.model_dump() if profile.shorts else None,
     }
