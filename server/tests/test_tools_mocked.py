@@ -89,7 +89,6 @@ def test_ducking_writes_volume_points(fake_session):
 
 def test_render_with_preset_async_verify(fake_session, color_clip, tmp_path):
     out = tmp_path / "out.mp4"
-    out.write_bytes(color_clip.read_bytes())
 
     def handler(method, params):
         if method == "render.list_templates":
@@ -115,6 +114,10 @@ def test_render_with_preset_async_verify(fake_session, color_clip, tmp_path):
         if method == "render.start":
             assert params.get("async") is True
             assert params["template_name"] == "Vertical 1080x1920"
+            assert params["output_path"].endswith(".partial.mp4")
+            from pathlib import Path
+
+            Path(params["output_path"]).write_bytes(color_clip.read_bytes())
             return {"ok": True, "job_id": "abc123", "state": "running", "async": True}
         if method == "render.status":
             return {"ok": True, "job_id": "abc123", "state": "complete", "percent": 100}
@@ -183,7 +186,6 @@ def test_match_preset_avc_alias_without_mp4_in_renderer_name():
 
 def test_render_with_preset_paginates_past_400(fake_session, color_clip, tmp_path):
     out = tmp_path / "out.mp4"
-    out.write_bytes(color_clip.read_bytes())
     all_templates = [
         {"renderer": "Video for Windows", "template": f"avi-{i}", "width": 1920, "height": 1080}
         for i in range(450)
@@ -231,6 +233,9 @@ def test_render_with_preset_paginates_past_400(fake_session, color_clip, tmp_pat
             }
         if method == "render.start":
             assert params["template_name"] == "Vertical 1080x1920"
+            from pathlib import Path
+
+            Path(params["output_path"]).write_bytes(color_clip.read_bytes())
             return {"ok": True, "job_id": "v9", "state": "running", "async": True}
         if method == "render.status":
             return {"ok": True, "job_id": "v9", "state": "complete", "percent": 100}
@@ -246,7 +251,6 @@ def test_render_with_preset_paginates_past_400(fake_session, color_clip, tmp_pat
 def test_render_with_preset_retries_old_host_limit_zero(fake_session, color_clip, tmp_path):
     """Pre-fix host: ``if (n >= limit)`` with limit=0 returned an empty list."""
     out = tmp_path / "out.mp4"
-    out.write_bytes(color_clip.read_bytes())
     vertical = {
         "renderer": "MAGIX AVC/AAC MP4",
         "renderer_name": "MAGIX AVC/AAC MP4",
@@ -262,6 +266,9 @@ def test_render_with_preset_retries_old_host_limit_zero(fake_session, color_clip
                 return {"ok": True, "templates": [], "count": 0}
             return {"ok": True, "templates": [vertical], "count": 1}
         if method == "render.start":
+            from pathlib import Path
+
+            Path(params["output_path"]).write_bytes(color_clip.read_bytes())
             return {"ok": True, "job_id": "old", "state": "running", "async": True}
         if method == "render.status":
             return {"ok": True, "job_id": "old", "state": "complete", "percent": 100}

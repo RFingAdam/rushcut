@@ -14,6 +14,8 @@ from .delivery import check_duration_cap, check_frame1_not_black
 from .features import check_required_features
 from .loop import check_loop, check_loop_audio, check_loop_video
 from .media import check_media
+from .ramps import check_speed_ramps, extract_ramp_steps
+from .seams import check_seams
 from .sources import check_source_preference, sources_from_edit
 from .speech import (
     check_speech_boundaries,
@@ -146,6 +148,13 @@ def run_checks(
     check_media_output: bool = False,
     ssim_min: float | None = None,
     audio_jump_db: float | None = None,
+    envelope: Any = None,
+    mic_audio: Any = None,
+    window_ms: float | None = None,
+    voiced_threshold_db: float | None = None,
+    ramp_pad_seconds: float | None = None,
+    word_confidence_min: float | None = None,
+    shift_ramps: bool = False,
 ) -> dict[str, Any]:
     """Run the public quality checks. Directors pass any cut list shape."""
     profile_obj: EditProfile | None = None
@@ -189,10 +198,12 @@ def run_checks(
 
     speech_mode = profile_obj.quality.speech_boundary.mode if profile_obj else "fail"
     turn_mode = profile_obj.quality.turn_completeness.mode if profile_obj else "warn"
+    seams_mode = profile_obj.quality.seams.mode if profile_obj else "warn"
+    ramp_mode = profile_obj.quality.speed_ramps.mode if profile_obj else "fail"
     feature_mode = "fail"
     source_mode = profile_obj.source_preference.on_mismatch if profile_obj else "fail"
     if gate == "off":
-        speech_mode = turn_mode = feature_mode = source_mode = "off"
+        speech_mode = turn_mode = seams_mode = ramp_mode = feature_mode = source_mode = "off"
 
     words: list[dict[str, Any]] | None = None
     speech: Any = None
@@ -306,6 +317,68 @@ def run_checks(
     if must_include is not None:
         raw_must = check_must_include(cuts, _maybe_load(must_include), mode="fail")
         checks.append(_apply_gate(raw_must, gate))
+
+    env = envelope
+    mic = mic_audio
+    if env is None and isinstance(edit_doc, dict):
+        env = edit_doc.get("envelope")
+    if mic is None and isinstance(edit_doc, dict):
+        mic = edit_doc.get("mic_audio") or edit_doc.get("mic_path")
+    if run_info:
+        run_dir = Path(run_info["dir"])
+        if env is None:
+            for name in ("envelope.json", "mic_envelope.json"):
+                candidate = run_dir / name
+                if candidate.is_file():
+                    env = str(candidate)
+                    break
+        if mic is None:
+            for name in ("mic.wav", "mic.flac", "mic.m4a", "isolated_mic.wav"):
+                candidate = run_dir / name
+                if candidate.is_file():
+                    mic = str(candidate)
+                    break
+    if isinstance(env, (str, os.PathLike)):
+        env_path = Path(env)
+        if env_path.is_file() and env_path.suffix.lower() in {".json", ".yaml", ".yml"}:
+            env = _maybe_load(env)
+    if (env is not None or mic is not None) and cut_points_from_cuts(cuts):
+        seam_window = window_ms
+        if seam_window is None and profile_obj is not None:
+            seam_window = profile_obj.quality.seams.window_ms
+        seam_threshold = voiced_threshold_db
+        if seam_threshold is None and profile_obj is not None:
+            seam_threshold = profile_obj.quality.seams.voiced_threshold_db
+        seam_fade = profile_obj.quality.seams.fade_seconds if profile_obj else 0.04
+        raw_seams = check_seams(
+            cuts,
+            mic_audio=mic,
+            envelope=env,
+            words=words,
+            window_ms=float(seam_window if seam_window is not None else 300.0),
+            voiced_threshold_db=float(seam_threshold if seam_threshold is not None else -32.0),
+            fade_seconds=float(seam_fade),
+            mode=seams_mode,
+        )
+        checks.append(_apply_gate(raw_seams, gate))
+
+    ramp_spec = edit_doc if edit_doc is not None else cuts
+    if extract_ramp_steps(ramp_spec):
+        ramp_pad = ramp_pad_seconds
+        if ramp_pad is None and profile_obj is not None:
+            ramp_pad = profile_obj.quality.speed_ramps.pad_seconds
+        conf = word_confidence_min
+        if conf is None and profile_obj is not None:
+            conf = profile_obj.quality.speed_ramps.confidence_min
+        raw_ramps = check_speed_ramps(
+            ramp_spec,
+            words,
+            pad_seconds=float(ramp_pad if ramp_pad is not None else 0.08),
+            confidence_min=float(conf if conf is not None else 0.0),
+            shift=bool(shift_ramps),
+            mode=ramp_mode,
+        )
+        checks.append(_apply_gate(raw_ramps, gate))
 
     if media_path:
         verify = verify_output(media_path)
@@ -516,4 +589,18 @@ def format_report(result: dict[str, Any]) -> str:
                 lines.append(f"      missing {ident} {detail}".rstrip())
             else:
                 lines.append(f"      missing {name}")
+        for item in (check.get("listen_here") or [])[:12]:
+            if isinstance(item, dict):
+                t = item.get("at_seconds")
+                role = item.get("role") or "cut"
+                why = item.get("reason") or "voiced"
+                loc = f"{t:.3f}s" if isinstance(t, (int, float)) else ""
+                lines.append(f"      listen here {loc}  {role}  {why}".rstrip())
+            else:
+                lines.append(f"      {item}")
+        if check.get("id") == "seams" and check.get("markdown") and not check.get("pass"):
+            # Keep the human table available on the text report.
+            for table_line in str(check["markdown"]).splitlines()[2:8]:
+                if table_line.startswith("|"):
+                    lines.append(f"      {table_line}")
     return "\n".join(lines) + "\n"

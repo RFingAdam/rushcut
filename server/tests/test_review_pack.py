@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from rushcut.cli import main as cli_main
-from rushcut.output_roots import OUTSIDE_ROOTS, path_allowed, refuse_output_path
+from rushcut.output_policy import OUTSIDE_ROOTS, check_output_path, is_under_root
 from rushcut.render.review_pack import export_review_pack, reassemble_review_pack
 from rushcut.render.sidecar import file_md5, verify_output
 
@@ -91,9 +91,9 @@ def test_export_review_pack_refuses_c_drive_when_not_allowed(tmp_path, ffmpeg_bi
     assert refused["ok"] is False
     assert refused["error"] == OUTSIDE_ROOTS
     assert not Path(r"C:\review\pack").exists()
-    assert refuse_output_path(r"C:\out\s.mp4", profile=profile)["error"] == OUTSIDE_ROOTS
-    assert path_allowed(r"D:\MediaOut\out\s.mp4", [r"D:\MediaOut"]) is True
-    assert path_allowed(r"D:\MediaOut\..\Windows\s.mp4", [r"D:\MediaOut"]) is False
+    assert check_output_path(r"C:\out\s.mp4", profile=profile)["error"] == OUTSIDE_ROOTS
+    assert is_under_root(r"D:\MediaOut\out\s.mp4", r"D:\MediaOut") is True
+    assert is_under_root(r"D:\MediaOut\..\Windows\s.mp4", r"D:\MediaOut") is False
     allowed = tmp_path / "allowed"
     ok = export_review_pack(
         [str(clip)],
@@ -101,7 +101,7 @@ def test_export_review_pack_refuses_c_drive_when_not_allowed(tmp_path, ffmpeg_bi
         profile={"output_roots": [str(allowed)]},
     )
     assert ok["ok"] is True
-    none = refuse_output_path(str(tmp_path / "anywhere"), profile={})
+    none = check_output_path(str(tmp_path / "anywhere"), profile={})
     assert none is None
 
 

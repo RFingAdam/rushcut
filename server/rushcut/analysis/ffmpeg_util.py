@@ -5,7 +5,10 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from typing import Any
+
+_tls = threading.local()
 
 
 class FfmpegError(RuntimeError):
@@ -26,6 +29,24 @@ def which_ffmpeg(name: str = "ffmpeg") -> str:
     return found
 
 
+def bind_job_process(job: Any | None) -> None:
+    """Route :func:`run` through a tracked :class:`JobProcess` on this thread."""
+    _tls.job = job
+
+
+def spawn(args: list[str], *, text: bool = True) -> subprocess.Popen[Any]:
+    """Start ffmpeg/ffprobe without waiting. Used so a render can be killed."""
+    try:
+        return subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=text,
+        )
+    except FileNotFoundError as exc:
+        raise FfmpegError(f"Executable not found: {args[0]}") from exc
+
+
 def run(
     args: list[str],
     *,
@@ -34,6 +55,9 @@ def run(
     capture: bool = True,
     text: bool = True,
 ) -> subprocess.CompletedProcess[Any]:
+    job = getattr(_tls, "job", None)
+    if job is not None and capture and text:
+        return job.run(args, timeout=timeout, check=check)
     try:
         proc = subprocess.run(
             args,

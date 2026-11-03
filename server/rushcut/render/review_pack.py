@@ -11,7 +11,7 @@ from typing import Any
 from ..analysis.ffmpeg_util import FfmpegError, run, which_ffmpeg
 from ..analysis.loudness import measure_loudness
 from ..analysis.probe import probe_media
-from ..output_roots import refuse_output_path
+from ..output_policy import check_output_path
 from .sidecar import file_md5, verify_output
 
 PROXY_PRESETS = {
@@ -281,7 +281,16 @@ def export_review_pack(
         return {"ok": False, "error": "outputs is required"}
     if not dest:
         return {"ok": False, "error": "dest is required"}
-    refused = refuse_output_path(dest, profile=profile)
+    loaded = profile
+    if isinstance(profile, (str, os.PathLike)) and str(profile).strip():
+        from ..profile import load_profile
+
+        loaded = load_profile(profile)
+    elif isinstance(profile, dict):
+        from ..profile import profile_from_data
+
+        loaded = profile_from_data(profile)
+    refused = check_output_path(dest, profile=loaded)
     if refused:
         return refused
     dest_dir = Path(dest)

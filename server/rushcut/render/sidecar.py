@@ -4,12 +4,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from datetime import datetime, timezone
 from typing import Any
 
-from ..analysis.ffmpeg_util import FfmpegError, run, which_ffmpeg
 from ..analysis.probe import probe_media
+from ..output_policy import check_output_path
 
 SIDECAR_KEYS = (
     "length",
@@ -19,7 +18,6 @@ SIDECAR_KEYS = (
     "music",
     "template",
 )
-_ERROR_RE = re.compile(r"\b(error|corrupt|invalid data)\b", re.IGNORECASE)
 
 
 def sidecar_path(output_path: str) -> str:
@@ -37,51 +35,6 @@ def file_md5(path: str) -> str:
     return digest.hexdigest()
 
 
-def _moov_ok(path: str, probe: dict[str, Any]) -> bool:
-    if probe.get("unfinalized_container"):
-        return False
-    name = str(probe.get("format_name") or "").lower()
-    if "mp4" in name or "mov" in name or "ismv" in name:
-        try:
-            with open(path, "rb") as fh:
-                head = fh.read(2 * 1024 * 1024)
-                fh.seek(0, os.SEEK_END)
-                size = fh.tell()
-                fh.seek(max(0, size - 2 * 1024 * 1024))
-                tail = fh.read()
-        except OSError:
-            return False
-        return b"moov" in head or b"moov" in tail
-    return not probe.get("header_duration_missing")
-
-
-def count_decode_errors(path: str) -> int:
-    try:
-        proc = run(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-v",
-                "error",
-                "-i",
-                path,
-                "-f",
-                "null",
-                "-",
-            ],
-            timeout=180,
-            check=False,
-        )
-    except FfmpegError:
-        return 1
-    text = proc.stderr or proc.stdout or ""
-    if isinstance(text, (bytes, bytearray)):
-        text = text.decode("utf-8", "replace")
-    hits = _ERROR_RE.findall(text)
-    if proc.returncode not in (0, None) and not hits:
-        return 1
-    return len(hits)
-
-
 def verify_output(
     path: str,
     *,
@@ -90,16 +43,40 @@ def verify_output(
     expect_audio: bool = True,
     duration_tolerance: float = 0.6,
     expect_duration: float | None = None,
+    decode: bool = True,
 ) -> dict[str, Any]:
+    """ffprobe + optional full-decode QA.
+
+    Always returns ``moov_ok``, ``decode_errors`` and ``md5``. ``ok`` is
+    false when the moov atom is missing or the decode reports errors, even
+    if the other expectation checks pass.
+    """
+    from .atomic import count_decode_errors, file_md5, has_moov_atom
+
     probe = probe_media(path)
-    if not probe.get("ok"):
-        return {
-            **probe,
-            "moov_ok": False,
-            "decode_errors": 1,
-            "md5": None,
-        }
+    md5 = file_md5(path)
+    moov_ok = bool(probe.get("ok")) and has_moov_atom(path)
+    if probe.get("unfinalized_container") or probe.get("header_duration_missing"):
+        moov_ok = False
+    decode_errors = 0
+    if decode and os.path.isfile(path):
+        decode_errors = count_decode_errors(path)
+    elif not os.path.isfile(path):
+        decode_errors = 1
     problems: list[str] = []
+    if not probe.get("ok"):
+        if probe.get("error"):
+            problems.append(str(probe.get("error")))
+        result = dict(probe)
+        result["ok"] = False
+        result["moov_ok"] = moov_ok
+        result["decode_errors"] = decode_errors
+        result["md5"] = md5
+        result["problems"] = problems
+        result["duration_seconds"] = float(
+            probe.get("stream_max_duration_seconds") or probe.get("duration_seconds") or 0
+        )
+        return result
     if expect_audio and not probe.get("has_audio"):
         problems.append("no audio stream")
     if expect_width and int(probe.get("width") or 0) != expect_width:
@@ -110,13 +87,10 @@ def verify_output(
     if expect_duration is not None:
         if abs(duration - expect_duration) > duration_tolerance:
             problems.append(f"duration {duration:.2f}s != {expect_duration:.2f}s ±{duration_tolerance}")
-    moov_ok = _moov_ok(path, probe)
-    decode_errors = count_decode_errors(path)
-    md5 = file_md5(path)
     if not moov_ok:
-        problems.append("moov atom missing or container unfinalized")
+        problems.append("missing moov atom")
     if decode_errors > 0:
-        problems.append(f"decode_errors {decode_errors}")
+        problems.append(f"{decode_errors} decode error(s)")
     return {
         "ok": not problems,
         "path": probe.get("path"),
@@ -130,6 +104,9 @@ def verify_output(
 
 
 def write_sidecar(output_path: str, edit_meta: dict[str, Any] | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    refused = check_output_path(output_path)
+    if refused:
+        return refused
     meta = {k: (edit_meta or {}).get(k) for k in SIDECAR_KEYS}
     # Accept a few aliases from callers.
     if meta["length"] is None:
