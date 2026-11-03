@@ -7,8 +7,11 @@ first spoken. Reuses :func:`rushcut.analysis.whisper.transcribe_media`.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
+import tempfile
 from typing import Any
 
 from .probe import probe_media
@@ -114,6 +117,7 @@ def pacing_from_words(
         "dead_stretches": dead,
         "longest_gap": longest,
         "first_15s": {"window_s": first_window_s, "word_count": len(first), "text": " ".join(first)},
+        "first_window": {"words": first, "text": " ".join(first), "window_s": first_window_s},
     }
     gate: dict[str, Any] = {
         "no_dead_stretches": {"pass": not dead, "value": len(dead),
@@ -125,11 +129,70 @@ def pacing_from_words(
         promise = _find_promise(rows, [str(k) for k in promise_keywords if str(k).strip()])
         result["promise"] = promise
         at = promise["at_s"]
+        result["keyword_at_s"] = at
         gate["promise_by_15s"] = {"pass": at is not None and at <= promise_by_s, "value": at,
                                   "target": f"title promise spoken by {promise_by_s:g} s"}
+    checks = {k: v for k, v in gate.items() if isinstance(v, dict) and "pass" in v}
+    reasons = [f"{name}: {item.get('target')}" for name, item in checks.items() if not item.get("pass")]
+    passed = all(item["pass"] for item in checks.values())
+    gate["passed"] = passed
+    gate["reasons"] = reasons
     result["gate"] = gate
-    result["gate_passed"] = all(item["pass"] for item in gate.values())
+    result["gate_passed"] = passed
     return result
+
+
+def _file_hash(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cache_dir() -> str:
+    override = os.environ.get("RUSHCUT_TRANSCRIPT_CACHE")
+    if override:
+        os.makedirs(override, exist_ok=True)
+        return override
+    path = os.path.join(tempfile.gettempdir(), "rushcut-transcripts")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _cache_name(path: str, model_size: str, language: str | None) -> str:
+    content = _file_hash(path)
+    located = hashlib.sha256(os.path.abspath(path).encode("utf-8")).hexdigest()[:16]
+    return f"{content}-{located}-{model_size}-{language or 'auto'}.json"
+
+
+def _load_cached_transcript(path: str, model_size: str, language: str | None) -> dict[str, Any] | None:
+    cache = os.path.join(_cache_dir(), _cache_name(path, model_size, language))
+    if not os.path.isfile(cache):
+        return None
+    try:
+        with open(cache, encoding="utf-8") as fh:
+            data = json.loads(fh.read())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict) and data.get("ok"):
+        data["cached"] = True
+        return data
+    return None
+
+
+def _store_cached_transcript(path: str, model_size: str, language: str | None, transcript: dict[str, Any]) -> None:
+    if not transcript.get("ok"):
+        return
+    cache = os.path.join(_cache_dir(), _cache_name(path, model_size, language))
+    try:
+        with open(cache, "w", encoding="utf-8") as fh:
+            json.dump(transcript, fh)
+    except OSError:
+        pass
 
 
 def measure_pacing(
@@ -139,12 +202,16 @@ def measure_pacing(
     model_size: str = "base",
     language: str | None = "en",
     wpm_min: float | None = WPM_MIN_NARRATED,
+    keywords: list[str] | None = None,
+    words: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Transcribe ``media_path`` with local Whisper and return pacing metrics.
 
     Soft-fails like ``transcribe_media`` when faster-whisper is missing. Use
     ``model_size="large-v3"`` for numbers comparable to published targets;
-    smaller models drop words and overstate dead stretches.
+    smaller models drop words and overstate dead stretches. Transcripts are
+    cached by SHA-256 of the file. ``keywords`` is an alias for
+    ``promise_keywords``. Pass ``words`` to skip Whisper.
     """
     if not media_path:
         return {"ok": False, "error": "media_path is required"}
@@ -156,8 +223,20 @@ def measure_pacing(
         return {"ok": False, "error": "dead_threshold_s must be a number"}
     if threshold <= 0:
         return {"ok": False, "error": "dead_threshold_s must be > 0"}
+    if promise_keywords is None:
+        promise_keywords = keywords
 
-    transcript = transcribe_media(media_path, model_size=model_size, language=language)
+    cached = False
+    if words is not None:
+        transcript = {"ok": True, "path": os.path.abspath(media_path), "words": words, "model": model_size}
+    else:
+        transcript = _load_cached_transcript(media_path, model_size, language)
+        if transcript is None:
+            transcript = transcribe_media(media_path, model_size=model_size, language=language)
+            if transcript.get("ok"):
+                _store_cached_transcript(media_path, model_size, language, transcript)
+        else:
+            cached = True
     if not transcript.get("ok"):
         return {**transcript, "stage": "transcribe"}
     words = transcript.get("words") or []
@@ -191,6 +270,7 @@ def measure_pacing(
                 "model": transcript.get("model", model_size),
                 "device": transcript.get("device"),
                 "language": transcript.get("language", language),
+                "cached": cached,
             }
         )
     return result

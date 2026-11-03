@@ -37,6 +37,9 @@ def test_pacing_from_words_counts_gaps_and_wpm():
     assert result["longest_gap"] == {"start_s": 31.0, "end_s": 60.0, "seconds": 29.0}
     assert result["first_15s"]["word_count"] == 5
     assert result["first_15s"]["text"] == "I made a million. Then"
+    assert result["first_window"]["words"][:4] == ["I", "made", "a", "million."]
+    assert result["gate"]["passed"] is False
+    assert result["gate"]["reasons"]
     assert result["gate"]["no_dead_stretches"]["pass"] is False
     assert result["gate"]["wpm"]["pass"] is False
     assert result["gate_passed"] is False

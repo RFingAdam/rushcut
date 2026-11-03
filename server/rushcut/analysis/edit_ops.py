@@ -29,13 +29,67 @@ def _ensure_parent(path: str) -> None:
 
 
 def cut_media(
-    path: str,
-    start_seconds: float,
+    path: str | None = None,
+    start_seconds: float = 0.0,
     end_seconds: float | None = None,
     output_path: str | None = None,
     length_seconds: float | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
 ) -> dict[str, Any]:
-    """Trim a media file to [start, end) and write a new file."""
+    """Trim a media file to [start, end) and write a new file.
+
+    Pass ``offset_map`` with ``session_start`` / ``session_end`` to cut in
+    session time (from ``stitch_session``). A range that stays in one file
+    is a single trim; a range that spans files concatenates the pieces.
+    """
+    if offset_map is not None and session_start is not None:
+        from .session import lookup_session_time
+
+        start_hit = lookup_session_time(offset_map, session_start)
+        if not start_hit.get("ok"):
+            return start_hit
+        if session_end is None:
+            if length_seconds is not None:
+                session_end = float(session_start) + float(length_seconds)
+            else:
+                return {"ok": False, "error": "session_end or length_seconds is required"}
+        end_hit = lookup_session_time(offset_map, float(session_end))
+        if not end_hit.get("ok"):
+            return end_hit
+        if start_hit["path"] == end_hit["path"]:
+            path = str(start_hit["path"])
+            start_seconds = float(start_hit["file_seconds"])
+            end_seconds = float(end_hit["file_seconds"])
+            length_seconds = None
+        else:
+            pieces: list[str] = []
+            tmp_dir = tempfile.mkdtemp(prefix="rushcut-session-cut-")
+            start_index = int(start_hit["index"])
+            end_index = int(end_hit["index"])
+            for index in range(start_index, end_index + 1):
+                entry = offset_map[index]
+                file_path = str(entry.get("path") or entry.get("work_path"))
+                file_start = float(start_hit["file_seconds"]) if index == start_index else 0.0
+                if index == end_index:
+                    file_end = float(end_hit["file_seconds"])
+                else:
+                    file_end = float(entry.get("duration_seconds") or 0)
+                piece = os.path.join(tmp_dir, f"piece-{index}.mp4")
+                cut = cut_media(file_path, file_start, file_end, piece)
+                if not cut.get("ok"):
+                    return cut
+                pieces.append(piece)
+            if not output_path:
+                output_path = os.path.join(tmp_dir, "session-cut.mp4")
+            cat = concat_media(pieces, output_path)
+            if cat.get("ok"):
+                cat["session_start"] = float(session_start)
+                cat["session_end"] = float(session_end)
+            return cat
+    if not path:
+        return {"ok": False, "error": "path is required"}
     err = _ok_path(path)
     if err:
         return err

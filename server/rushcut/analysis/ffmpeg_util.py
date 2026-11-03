@@ -32,13 +32,14 @@ def run(
     timeout: float = 120,
     check: bool = True,
     capture: bool = True,
-) -> subprocess.CompletedProcess[str]:
+    text: bool = True,
+) -> subprocess.CompletedProcess[Any]:
     try:
         proc = subprocess.run(
             args,
             check=False,
             capture_output=capture,
-            text=True,
+            text=text,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -46,7 +47,9 @@ def run(
     except FileNotFoundError as exc:
         raise FfmpegError(f"Executable not found: {args[0]}") from exc
     if check and proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()
+        err_raw = proc.stderr or proc.stdout or ""
+        err = err_raw.decode("utf-8", "replace") if isinstance(err_raw, (bytes, bytearray)) else str(err_raw)
+        err = err.strip()
         raise FfmpegError(
             f"{args[0]} exited {proc.returncode}: {err[:800]}",
             stderr=err,

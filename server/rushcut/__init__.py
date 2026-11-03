@@ -353,12 +353,17 @@ def transcribe_media(
     diarize: bool | str = False,
     words: list[dict[str, Any]] | None = None,
     turns: list[dict[str, Any]] | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
+    session_seconds: float | None = None,
 ) -> dict:
     """Word-timestamp transcript, optional speaker diarization. Soft-fails if Whisper is missing.
 
     Pass `words` to skip Whisper (cached transcript). `diarize` is false, true/'auto',
     'stereo' (L/R channels), or 'pyannote' if that extra is installed. Turns may be
     supplied directly. Slice with start_seconds/end_seconds; times stay source-absolute.
+    offset_map + session_start/session_end accept stitch_session time.
     """
     from .analysis.transcript import analyze_transcript as _analyze
 
@@ -371,6 +376,10 @@ def transcribe_media(
         start_seconds=start_seconds,
         end_seconds=end_seconds,
         diarize=diarize,
+        offset_map=offset_map,
+        session_start=session_start,
+        session_end=session_end,
+        session_seconds=session_seconds,
     )
 
 
@@ -399,16 +408,31 @@ def burn_captions(media_path: str, ass_path: str, output_path: str | None = None
 
 @mcp.tool()
 def cut_media(
-    path: str,
-    start_seconds: float,
+    path: str | None = None,
+    start_seconds: float = 0.0,
     end_seconds: float | None = None,
     output_path: str | None = None,
     length_seconds: float | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
 ) -> dict:
-    """Trim a media file to a time range with ffmpeg. No NLE."""
+    """Trim a media file to a time range with ffmpeg. No NLE.
+
+    Pass offset_map + session_start/session_end to cut in stitch_session time.
+    """
     from .analysis.edit_ops import cut_media as _cut
 
-    return _cut(path, start_seconds, end_seconds, output_path, length_seconds)
+    return _cut(
+        path,
+        start_seconds,
+        end_seconds,
+        output_path,
+        length_seconds,
+        offset_map=offset_map,
+        session_start=session_start,
+        session_end=session_end,
+    )
 
 
 @mcp.tool()
@@ -505,11 +529,118 @@ def measure_pacing(
     promise_keywords: list[str] | None = None,
     model_size: str = "base",
     language: str | None = "en",
+    keywords: list[str] | None = None,
+    words: list[dict[str, Any]] | None = None,
 ) -> dict:
     """Narration pacing via local Whisper: wpm, dead stretches, longest gap, words in first 15 s, time to promise. No NLE."""
     from .analysis.pacing import measure_pacing as _pacing
 
-    return _pacing(media_path, dead_threshold_s, promise_keywords, model_size, language)
+    return _pacing(
+        media_path,
+        dead_threshold_s,
+        promise_keywords,
+        model_size,
+        language,
+        keywords=keywords,
+        words=words,
+    )
+
+
+@mcp.tool()
+def stitch_session(
+    paths: list[str],
+    gap_threshold_s: float = 600.0,
+    output_path: str | None = None,
+    session_index: int | None = None,
+    remux_unfinalized: bool = True,
+) -> dict:
+    """Group recording files by gap, remux unfinalized MKVs, concat, return an offset map. No NLE."""
+    from .analysis.session import stitch_session as _stitch
+
+    return _stitch(
+        paths,
+        gap_threshold_s=gap_threshold_s,
+        output_path=output_path,
+        session_index=session_index,
+        remux_unfinalized=remux_unfinalized,
+    )
+
+
+@mcp.tool()
+def session_lookup(
+    offset_map: list[dict[str, Any]],
+    session_seconds: float,
+) -> dict:
+    """Map stitch_session time onto a source file and file-local time. No NLE."""
+    from .analysis.session import lookup_session_time
+
+    return lookup_session_time(offset_map, session_seconds)
+
+
+@mcp.tool()
+def detect_region_presence(
+    path: str,
+    box: dict[str, Any] | list[float],
+    mode: str = "auto",
+    sample_fps: float = 1.0,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_seconds: float | None = None,
+    session_end: float | None = None,
+) -> dict:
+    """Per-second overlay or face presence in a region box. CPU Haar or variance/edge fallback. No NLE."""
+    from .analysis.region import detect_region_presence as _detect
+
+    return _detect(
+        path,
+        box,
+        mode=mode,
+        sample_fps=sample_fps,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        offset_map=offset_map,
+        session_seconds=session_seconds,
+        session_end=session_end,
+    )
+
+
+@mcp.tool()
+def check_loop(
+    path: str,
+    ssim_min: float = 0.85,
+    audio_jump_db: float = 6.0,
+) -> dict:
+    """SSIM of last frames vs frame 1, plus first/last 100 ms audio-level continuity. No NLE."""
+    from .quality.loop import check_loop as _loop
+
+    return _loop(path, ssim_min=ssim_min, audio_jump_db=audio_jump_db)
+
+
+@mcp.tool()
+def check_media(
+    path: str,
+    cuts: dict[str, Any] | list | str | None = None,
+    transcript: dict[str, Any] | list | str | None = None,
+    words: list[dict[str, Any]] | None = None,
+    pad_seconds: float = 0.12,
+    transcribe: bool = True,
+    model_size: str = "base",
+    language: str | None = "en",
+) -> dict:
+    """Integrated LUFS, true peak, duration, fps; re-transcribe the render and flag chopped words at joins."""
+    from .quality.media import check_media as _media
+
+    return _media(
+        path,
+        cuts=cuts,
+        transcript=transcript,
+        words=words,
+        pad_seconds=pad_seconds,
+        transcribe=transcribe,
+        model_size=model_size,
+        language=language,
+    )
 
 
 @mcp.tool()
@@ -643,8 +774,12 @@ def check_output(
     available_sources: list | None = None,
     pad_seconds: float | None = None,
     mode: str | None = None,
+    must_include: list | dict | str | None = None,
+    loop: bool = False,
+    check_media_output: bool = False,
 ) -> dict:
-    """Public quality checks: speech boundaries, required features, source preference.
+    """Public quality checks: speech boundaries, required features, source preference,
+    required-event coverage, optional loop-seam and check_media on the render.
 
     `rushcut check` is the CLI. Any director can pass a cut list to validate
     against a transcript (word timestamps + optional speakers).
@@ -662,6 +797,9 @@ def check_output(
         available_sources=available_sources,
         pad_seconds=pad_seconds,
         mode=mode,
+        must_include=must_include,
+        loop=loop,
+        check_media_output=check_media_output,
     )
 
 

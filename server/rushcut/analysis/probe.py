@@ -39,18 +39,30 @@ def probe_media(path: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
     fmt = data.get("format") or {}
+    raw_fmt_duration = fmt.get("duration")
+    header_duration_missing = raw_fmt_duration in (None, "", "N/A")
     try:
-        duration = float(fmt.get("duration") or 0)
+        duration = float(raw_fmt_duration or 0)
     except (TypeError, ValueError):
         duration = 0.0
+        header_duration_missing = True
 
     video = None
     audio = None
+    duration_estimated = False
     for stream in data.get("streams") or []:
         if stream.get("codec_type") == "video" and video is None:
             video = stream
         elif stream.get("codec_type") == "audio" and audio is None:
             audio = stream
+        if duration <= 0 and stream.get("duration") not in (None, "", "N/A"):
+            try:
+                stream_dur = float(stream["duration"])
+            except (TypeError, ValueError):
+                stream_dur = 0.0
+            if stream_dur > duration:
+                duration = stream_dur
+                duration_estimated = True
 
     result: dict[str, Any] = {
         "ok": True,
@@ -60,6 +72,9 @@ def probe_media(path: str) -> dict[str, Any]:
         "format_name": fmt.get("format_name"),
         "has_video": video is not None,
         "has_audio": audio is not None,
+        "header_duration_missing": header_duration_missing,
+        "duration_estimated": duration_estimated,
+        "unfinalized_container": header_duration_missing or duration <= 0,
     }
     if video:
         result["width"] = int(video.get("width") or 0)

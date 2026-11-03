@@ -16,7 +16,7 @@
 
 Rushcut MCP is a [Model Context Protocol](https://modelcontextprotocol.io)
 server (Python, [FastMCP](https://github.com/jlowin/fastmcp)) that exposes
-**71 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
+**76 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
 Cursor, or anything else that speaks stdio MCP. The same tool names
 (`add_track`, `place_media`, `trim_event`, `set_event_fades`,
 `render_with_preset`, ...) drive whichever backend you select with
@@ -160,7 +160,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-71 tools, generated from the server's registered tool list. Tool names are
+76 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -175,8 +175,8 @@ reason instead of raising.
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (7) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar` |
-| Analysis, no NLE needed (4) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media` |
-| Quality, no NLE needed (2) | `check_output`, `validate_profile` |
+| Analysis, no NLE needed (7) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
+| Quality, no NLE needed (4) | `check_output`, `validate_profile`, `check_loop`, `check_media` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
 | File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
@@ -197,7 +197,12 @@ VOD when a local recording was available.
 ```bash
 # After pip install -e . in server/
 rushcut check edit.json --profile edit_profile.yaml --transcript transcript.json
-rushcut check out/render.mp4 --profile edit_profile.yaml
+rushcut check edit.json --must-include '[{"t":12,"pre":1,"post":1,"id":"event_a"}]'
+rushcut check out/render.mp4 --profile edit_profile.yaml --loop --check-media
+rushcut check-loop out/short.mp4
+rushcut check-media out/render.mp4 --cuts cuts.json
+rushcut stitch-session rec1.mkv rec2.mkv rec3.mkv rec4.mkv --output session.mkv
+rushcut detect-region-presence session.mkv --box 240,0,80,80 --mode activity
 rushcut profile validate edit_profile.yaml
 ```
 
@@ -226,6 +231,12 @@ quality:
 If the transcript has speaker labels, turn-completeness warns (by default)
 when a kept turn is followed within `reply_window_seconds` by another
 speaker whose reply is not in the cut list.
+
+`--must-include '[{"t":12,"pre":1,"post":1,"id":"..."}]'` fails when a
+required event's `[t-pre, t+post]` window is not on the cut timeline.
+`check_loop` reports SSIM of the last frames vs frame 1 and the dB jump
+across the audio wrap. `check_media` returns integrated LUFS, true peak,
+duration and fps, and re-checks speech boundaries on the render.
 
 ### Transcription primitive
 
@@ -394,7 +405,7 @@ flowchart LR
     client["MCP client<br/>Claude Code / Desktop / Cursor"] -- "stdio (MCP)" --> server
 
     subgraph server["Rushcut MCP server (Python, FastMCP)"]
-        tools["71 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
+        tools["76 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
         facade --> select{"DIRECTOR_EDITOR"}
         tools --> analysis["analysis/ + render/ + quality/<br/>probe, transcript, captions,<br/>speech boundaries, verify"]
     end

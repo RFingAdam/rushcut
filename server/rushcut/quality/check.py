@@ -9,7 +9,10 @@ from typing import Any
 from ..analysis.transcript import analyze_transcript, speech_spans_from_audio
 from ..profile import EditProfile, load_profile, profile_from_data
 from ..render.sidecar import verify_output
+from .coverage import check_must_include
 from .features import check_required_features
+from .loop import check_loop
+from .media import check_media
 from .sources import check_source_preference, sources_from_edit
 from .speech import (
     check_speech_boundaries,
@@ -137,6 +140,11 @@ def run_checks(
     pad_seconds: float | None = None,
     mode: str | None = None,
     reply_window_seconds: float | None = None,
+    must_include: Any = None,
+    loop: bool = False,
+    check_media_output: bool = False,
+    ssim_min: float | None = None,
+    audio_jump_db: float | None = None,
 ) -> dict[str, Any]:
     """Run the public quality checks. Directors pass any cut list shape."""
     profile_obj: EditProfile | None = None
@@ -294,6 +302,10 @@ def run_checks(
         )
         checks.append(_apply_gate(raw_src, gate))
 
+    if must_include is not None:
+        raw_must = check_must_include(cuts, _maybe_load(must_include), mode="fail")
+        checks.append(_apply_gate(raw_must, gate))
+
     if media_path:
         verify = verify_output(media_path)
         verify_check = {
@@ -309,6 +321,44 @@ def run_checks(
         if not verify.get("ok") and verify.get("error"):
             verify_check["detail"] = str(verify.get("error"))
         checks.append(_apply_gate(verify_check, gate))
+        if loop:
+            loop_kwargs: dict[str, Any] = {"mode": "fail"}
+            if ssim_min is not None:
+                loop_kwargs["ssim_min"] = float(ssim_min)
+            if audio_jump_db is not None:
+                loop_kwargs["audio_jump_db"] = float(audio_jump_db)
+            raw_loop = check_loop(media_path, **loop_kwargs)
+            checks.append(_apply_gate(raw_loop, gate))
+        if check_media_output:
+            media = check_media(
+                media_path,
+                cuts=cuts,
+                transcript=speech,
+                pad_seconds=float(pad),
+                transcribe=False,
+            )
+            media_check = {
+                "id": "check_media",
+                "pass": bool(media.get("ok")) and not media.get("chopped_words"),
+                "mode": "fail",
+                "value": int(media.get("chopped_word_count") or 0),
+                "limit": 0,
+                "integrated_lufs": media.get("integrated_lufs"),
+                "true_peak_dbtp": media.get("true_peak_dbtp"),
+                "duration_seconds": media.get("duration_seconds"),
+                "fps": media.get("fps"),
+                "chopped_words": media.get("chopped_words") or [],
+                "detail": (
+                    f"LUFS {media.get('integrated_lufs')} peak {media.get('true_peak_dbtp')} "
+                    f"{media.get('duration_seconds')}s"
+                ),
+            }
+            if media.get("chopped_words"):
+                media_check["detail"] = (
+                    f"{media.get('chopped_word_count')} chopped word(s) at output joins"
+                )
+                media_check["pass"] = False
+            checks.append(_apply_gate(media_check, gate))
 
     failures = [c for c in checks if not c.get("pass") and c.get("severity") == "error"]
     warnings = [c for c in checks if c.get("warned") or c.get("severity") == "warning"]
@@ -358,5 +408,10 @@ def format_report(result: dict[str, Any]) -> str:
             loc = f"{at_s:.3f}s" if isinstance(at_s, (int, float)) else (path or "")
             lines.append(f"      {role:4} {loc}  {text}{span_t}".rstrip())
         for name in check.get("missing") or []:
-            lines.append(f"      missing {name}")
+            if isinstance(name, dict):
+                ident = name.get("id") or name.get("t") or "event"
+                detail = name.get("detail") or ""
+                lines.append(f"      missing {ident} {detail}".rstrip())
+            else:
+                lines.append(f"      missing {name}")
     return "\n".join(lines) + "\n"
