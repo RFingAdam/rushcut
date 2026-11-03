@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 import threading
 import uuid
 from typing import Any
 
 from ..analysis.captions import burn_captions
-from ..analysis.ffmpeg_util import FfmpegError, run, which_ffmpeg
+from ..analysis.ffmpeg_util import FfmpegError, bind_job_process, run, which_ffmpeg
 from ..analysis.probe import probe_media
+from ..output_policy import check_output_path, make_work_dir
+from ..render.atomic import InterruptedRender, JobProcess, mux_to_partial
 from .otio import OtioBackend
 from .protocol import capability_sheet, fail, ok, unsupported
 
@@ -196,15 +197,23 @@ class FfmpegBackend:
         output_path = p.get("output_path")
         if not output_path:
             return fail("output_path is required", editor=self.name)
+        refused = check_output_path(p.get("final_path") or output_path)
+        if refused:
+            refused["editor"] = self.name
+            return refused
         async_render = p.get("async", True)
         job_id = uuid.uuid4().hex[:12]
+        tracker = JobProcess()
         with self._lock:
             self._jobs[job_id] = {
                 "job_id": job_id,
                 "state": "running",
                 "percent": 0,
-                "output_path": output_path,
+                "output_path": p.get("final_path") or output_path,
+                "partial_path": output_path,
+                "pid": None,
                 "ok": True,
+                "_tracker": tracker,
             }
         if async_render:
             thread = threading.Thread(target=self._run_job, args=(job_id, p), daemon=True)
@@ -231,25 +240,43 @@ class FfmpegBackend:
                 job = None
         if not job:
             return fail("no render job", editor=self.name)
-        return dict(job)
+        out = {k: v for k, v in job.items() if not str(k).startswith("_")}
+        tracker = job.get("_tracker")
+        if tracker is not None:
+            out["pid"] = tracker.pid
+        return out
 
     def _run_job(self, job_id: str, p: dict[str, Any]) -> None:
+        tracker = None
+        with self._lock:
+            existing = self._jobs.get(job_id) or {}
+            tracker = existing.get("_tracker")
+        bind_job_process(tracker)
         try:
             result = self._encode(p)
+        except InterruptedRender as exc:
+            result = fail(str(exc), editor=self.name, state="interrupted")
         except Exception as exc:  # noqa: BLE001 — surface any encoder crash as a job failure
             result = fail(f"ffmpeg render failed: {exc}", editor=self.name)
+        finally:
+            bind_job_process(None)
         result = dict(result)
         result.setdefault("job_id", job_id)
-        result.setdefault("output_path", p.get("output_path"))
+        result.setdefault("output_path", p.get("final_path") or p.get("output_path"))
+        result.setdefault("partial_path", p.get("output_path"))
         result.setdefault("editor", self.name)
         result.setdefault("used_mode", "ffmpeg")
         if result.get("ok"):
             result["state"] = "complete"
             result["percent"] = 100
+        elif str(result.get("state") or "").lower() == "interrupted":
+            result["state"] = "interrupted"
+            result.setdefault("error", "render interrupted")
         else:
             result["state"] = "failed"
             result.setdefault("error", "render failed")
         with self._lock:
+            result["_tracker"] = tracker
             self._jobs[job_id] = result
 
     def _encode(self, p: dict[str, Any]) -> dict[str, Any]:
@@ -277,7 +304,7 @@ class FfmpegBackend:
 
         range_start = float(p["start_seconds"]) if p.get("start_seconds") is not None else 0.0
         range_length = p.get("length_seconds")
-        tmp = tempfile.mkdtemp(prefix="nle-ffmpeg-")
+        tmp = make_work_dir("nle-ffmpeg-")
         try:
             program, duration = self._compose_program(
                 video_tracks,
@@ -297,14 +324,17 @@ class FfmpegBackend:
                 if not burned.get("ok"):
                     return burned
             else:
-                shutil.copyfile(program, output_path)
+                mux_to_partial(program, output_path, copy=True)
             return ok(
-                output_path=os.path.abspath(output_path),
+                output_path=os.path.abspath(p.get("final_path") or output_path),
+                partial_path=os.path.abspath(output_path),
                 width=width,
                 height=height,
                 duration_seconds=duration,
                 editor=self.name,
             )
+        except InterruptedRender:
+            raise
         except FfmpegError as exc:
             return fail(str(exc), editor=self.name)
         finally:

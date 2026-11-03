@@ -88,6 +88,10 @@ def validate_profile_file(path: str | os.PathLike[str]) -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc), "path": str(path)}
     payload = profile.model_dump(by_alias=True)
+    from ..output_policy import policy_snapshot, report_stale_partials, set_active_profile
+
+    set_active_profile(profile)
+    snapshot = policy_snapshot(profile)
     return {
         "ok": True,
         "path": os.path.abspath(str(path)),
@@ -95,4 +99,9 @@ def validate_profile_file(path: str | os.PathLike[str]) -> dict[str, Any]:
         "id": profile.id,
         "required_features": list(profile.required_features),
         "source_preference": profile.source_preference.model_dump(),
+        "output_roots": snapshot["output_roots"],
+        "work_roots": snapshot["work_roots"],
+        "output_policy": snapshot["output_policy"],
+        "output_roots_source": snapshot["output_roots_source"],
+        "stale_partials": report_stale_partials(),
     }

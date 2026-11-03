@@ -318,8 +318,11 @@ add_video_event(0, "/media/raw.mp4", 0.0, -1)  # track 0, at 0 s, full length
 trim_event(0, 0, length_seconds=8.0, take_offset_seconds=42.0)
 set_event_fades(0, 0, fade_in_seconds=0.5, fade_out_seconds=0.5)
 
-result = render_with_preset("/media/out.mp4", preset="1080p")
-print(result)  # render result, ffprobe verification and the .edit.json sidecar path
+# Point this at a folder you own. On Windows, set RUSHCUT_OUTPUT_ROOTS
+# (or output_roots: in edit_profile.yaml) so renders cannot land on C:.
+output_root = os.environ.get("RUSHCUT_OUTPUT_ROOTS", "/media/edits").split(";")[0]
+result = render_with_preset(os.path.join(output_root, "out.mp4"), preset="1080p")
+print(result)  # render result, ffprobe verification, .qa.json and .edit.json sidecars
 ```
 
 The agent can also skip the timeline and work on files directly:
@@ -457,6 +460,9 @@ your MCP client config.
 | `NLE_WHISPER_DEVICE` | auto (CUDA if available, else CPU) | Force `cpu` or `cuda` for `transcribe_media`. `VEGAS_WHISPER_DEVICE` also works. |
 | `NLE_WHISPER_COMPUTE` | `float16` on CUDA, `int8` on CPU | faster-whisper compute type. `VEGAS_WHISPER_COMPUTE` also works. |
 | `PYANNOTE_AUTH_TOKEN` / `HF_TOKEN` | unset | Optional Hugging Face token if `diarize=pyannote` is used. |
+| `RUSHCUT_OUTPUT_ROOTS` | unset (unrestricted, one warning) | Allowed output directories. `;`-separated or a JSON list. Every `output_path` / `output_dir` is resolved (including `..`, symlinks/junctions, UNC) and refused with `{ok:false, error:"output outside allowed roots"}` when it falls outside. |
+| `RUSHCUT_WORK_ROOTS` | first output root | Scratch / temp directories. Defaults to the first output root instead of `%TEMP%`. |
+| `RUSHCUT_PROFILE` | unset | Path to `edit_profile.yaml`. Its `output_roots` / `work_roots` apply when the env vars are unset. |
 
 ## Security
 
@@ -472,8 +478,14 @@ your MCP client config.
   so a web page can't reach the port with an HTTP request.
 - **Local processes, local files.** Analysis and FFmpeg tools run `ffmpeg` /
   `ffprobe` as subprocesses (argument lists, no shell) and read and write the
-  paths the agent passes. Run the server as a user that should have access to
-  those files, and review what an agent renders or overwrites.
+  paths the agent passes. Set `RUSHCUT_OUTPUT_ROOTS` (or `output_roots` on
+  the profile) so a render cannot write outside those folders. Run the server
+  as a user that should have access to those files, and review what an agent
+  renders or overwrites.
+- **Atomic renders.** Encodes write `<name>.partial.mp4` with `+faststart`.
+  A full decode and MD5 run before the file is renamed; a sidecar
+  `<name>.qa.json` records the result. Killing ffmpeg leaves only the
+  `.partial` file.
 - **Resolve** is reached through Blackmagic's own scripting API with
   External scripting = Local; Rushcut opens no extra ports for it.
 

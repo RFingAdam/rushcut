@@ -42,7 +42,7 @@ writes run inside an `UndoBlock` on the UI thread; `project.new` /
 | Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP + CLI; no host RPC) |
 | File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` | ✅ (`cut_media` accepts session time) |
 | Edit helpers | `apply_crossfade`, `apply_ducking` | ✅ |
-| Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` | ✅ (preset matching walks the full template list; MAGIX AVC/AAC aliases) |
+| Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` + `<name>.qa.json` | ✅ (writes `.partial.mp4` + `+faststart`; moov/decode/MD5 before rename; output-root policy) |
 
 Soft failures return JSON-RPC **result** `{ "ok": false, "error": "..." }` (never crash VEGAS).
 
