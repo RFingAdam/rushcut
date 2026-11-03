@@ -526,6 +526,13 @@ If you change a host method or MCP tool, update
 | `server/tests/` | Mocked hosts and synthetic ffmpeg fixtures |
 | `docs/` | Setup, FFmpeg, Resolve, protocol, API coverage, editors, roadmap, migration, licensing |
 
+**Editing standards stay downstream.** Rushcut ships generic editing
+primitives only. House styles, layouts, presets and the editing standard a
+channel follows (what every Short must have, how to run a cut) belong in the
+downstream pipeline repo that uses Rushcut, usually as
+`docs/EDITING_STANDARD.md` there. Do not add them here; `scripts/check_boundary.py`
+enforces this.
+
 Inspired by [Bitwig MCP Server](https://github.com/WeModulate/bitwig-mcp-server)
 and an early CC0-1.0 architecture sketch,
 [MarcoRavich/VEGAS-AI-control](https://github.com/MarcoRavich/VEGAS-AI-control)
