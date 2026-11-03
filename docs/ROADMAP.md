@@ -51,7 +51,9 @@ Host-backed helpers:
 - Named presets: `vertical` (1080×1920), `1080p`, `4k` via `render_with_preset`
 - `render.start(async=true)` uses documented `Vegas.BeginRender` + `RenderProgress` / `RenderFinished`
 - `render_status` / `wait_for_render` poll from Python (never sit on the UI-marshal wait)
-- `verify_output` (ffprobe: duration, resolution, audio)
+- `verify_output` (ffprobe + full decode: `moov_ok`, `decode_errors`, `md5`)
+- Atomic render: `<name>.partial.mp4` + `+faststart`, rename only after QA, `<name>.qa.json`
+- Output-root policy: `RUSHCUT_OUTPUT_ROOTS` / `output_roots` (work roots for scratch)
 - Sidecar `<output>.edit.json`: length, hook start, caption style, zoom count, music, template
 
 ## Dual-mode host (complete, documented against Pro 22 help)

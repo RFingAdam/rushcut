@@ -750,7 +750,7 @@ def verify_output(
     expect_audio: bool = True,
     expect_duration: float | None = None,
 ) -> dict:
-    """ffprobe-check a rendered file (duration, resolution, audio present)."""
+    """ffprobe + full-decode check (moov_ok, decode_errors, md5)."""
     from .render.sidecar import verify_output as _verify
 
     return _verify(
@@ -969,6 +969,9 @@ def resolve_set_voice_isolation(track_index: int, event_index: int, enabled: boo
 
 
 def main() -> None:
+    from .output_policy import report_stale_partials
+
+    report_stale_partials()
     mcp.run()
 
 

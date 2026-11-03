@@ -91,8 +91,8 @@ Almost every VEGAS-side failure is a JSON-RPC **result** with
 | `transport.stop` | — | |
 | `transport.seek` | `seconds` | cursor position |
 | `render.list_templates` | `renderer_contains?`, `template_contains?`, `limit?`, `offset?` | `limit=0` (host default) = unlimited; `truncated` when a positive limit was hit |
-| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?` | default `async=true` → `BeginRender` + `job_id` |
-| `render.status` | `job_id?` | `{state, percent, output_path}` |
+| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?` | Python rewrites `output_path` to `<name>.partial.mp4`; default `async=true` → `BeginRender` + `job_id`. Refuses paths outside `RUSHCUT_OUTPUT_ROOTS`. |
+| `render.status` | `job_id?` | `{state, percent, output_path, partial_path?}` — `interrupted` if ffmpeg was killed |
 | `project.set_video` | `width?`, `height?`, `frame_rate?` | |
 
 MCP tool names are the Python functions in

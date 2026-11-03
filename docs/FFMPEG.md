@@ -57,8 +57,9 @@ set_project_video(1920, 1080, 24)
 add_track("video", "V1")
 add_video_event(0, r"/path/to/clip.mp4", 0.0, -1)
 trim_event(0, 0, length_seconds=5.0, take_offset_seconds=12.0)
-started = render_start(r"/path/to/out.mp4", async_render=True)
-wait_for_render(started["job_id"])
+# Prefer a configured root (RUSHCUT_OUTPUT_ROOTS / output_roots) over C:\out.
+started = render_start(r"/path/to/edits/out.mp4", async_render=True)
+wait_for_render(started["job_id"])  # decode-check, write out.qa.json, then rename
 ```
 
 Transport (`play` / `stop` / `seek`) is unsupported — there is no GUI.

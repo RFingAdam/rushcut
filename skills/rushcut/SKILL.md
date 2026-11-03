@@ -35,7 +35,11 @@ edits.
    - `apply_crossfade` on joins; `apply_ducking` for music under voice
    - `generate_captions` then `burn_captions`, or `add_title`
 5. `render_with_preset` (`1080p`, `vertical`, `4k`) or `render_start`.
-6. `verify_output` on the file, then `check_output` (or `rushcut check`)
+   Encodes write `<name>.partial.mp4` and rename only after a full-decode
+   QA. Honor `RUSHCUT_OUTPUT_ROOTS` / profile `output_roots` — never
+   render to `C:` when a D: edit root is configured.
+6. `verify_output` on the file (`moov_ok`, `decode_errors`, `md5`), then
+   `check_output` (or `rushcut check`)
    with the profile, transcript, and cut list. Speech-boundary, required
    features, and source-preference failures are not silent.
    `check_media` on the render: integrated LUFS, true peak, duration, fps,
@@ -78,6 +82,8 @@ These tools never rank footage; you choose the beats.
 - Prefer `local_recording` over `platform_vod` when both exist.
 - Honor `required_features` from `edit_profile.yaml`; record what you
   applied on the edit (`applied_features`) so `check_output` can verify.
+- Honor `output_roots` / `RUSHCUT_OUTPUT_ROOTS`. A path outside those
+  roots returns `{ok:false, error:"output outside allowed roots"}`.
 - `find_highlights`, `apply_vertical_short`, and `propose_edit` are removed
   stubs. Do not call them for real work.
 - VEGAS extension mode needs `%LOCALAPPDATA%\vegas-director-mcp\token`.

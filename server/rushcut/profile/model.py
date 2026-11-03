@@ -144,6 +144,8 @@ class EditProfile(BaseModel):
     source_preference: SourcePreference = Field(default_factory=SourcePreference)
     sources: list[SourceItem] = Field(default_factory=list)
     quality: QualitySettings = Field(default_factory=QualitySettings)
+    output_roots: list[str] = Field(default_factory=list)
+    work_roots: list[str] = Field(default_factory=list)
 
     @field_validator("required_features")
     @classmethod
@@ -153,6 +155,18 @@ class EditProfile(BaseModel):
             name = str(item).strip()
             if not name:
                 raise ValueError("required_features: entries must be non-empty strings")
+            if name not in cleaned:
+                cleaned.append(name)
+        return cleaned
+
+    @field_validator("output_roots", "work_roots")
+    @classmethod
+    def _roots_non_empty(cls, value: list[str], info: Any) -> list[str]:
+        cleaned: list[str] = []
+        for item in value:
+            name = str(item).strip()
+            if not name:
+                raise ValueError(f"{info.field_name}: entries must be non-empty strings")
             if name not in cleaned:
                 cleaned.append(name)
         return cleaned
