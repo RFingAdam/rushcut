@@ -1133,6 +1133,32 @@ def validate_profile(path: str) -> dict:
 
 
 @mcp.tool()
+def export_review_pack(
+    outputs: list[str],
+    dest: str,
+    proxy: str = "720p",
+    chunk_mb: float | None = None,
+    profile: str | dict[str, Any] | None = None,
+) -> dict:
+    """Write 720p/1 Mbps proxies, a contact sheet per file, and QA.json/QA.md. Optional chunks. Finals are only read."""
+    return tools.export_review_pack(
+        outputs, dest, proxy=proxy, chunk_mb=chunk_mb, profile=profile
+    )
+
+
+@mcp.tool()
+def fits_cap(
+    spec: dict[str, Any] | list | None = None,
+    max_seconds: float | None = None,
+    fps: float | None = None,
+) -> dict:
+    """Predict output duration from a segment spec (including speed ramps) and test a Shorts cap."""
+    from .formats import fits_cap as _fits
+
+    return _fits(spec, max_seconds=max_seconds, fps=fps)
+
+
+@mcp.tool()
 def write_edit_sidecar(output_path: str, edit_meta: dict[str, Any] | None = None) -> dict:
     """Write <output>.edit.json (length, hook start, caption style, zoom count, music, template)."""
     from .render.sidecar import write_sidecar

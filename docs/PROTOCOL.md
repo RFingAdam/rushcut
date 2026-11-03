@@ -106,7 +106,7 @@ Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
 `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`,
 `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`,
 `loop_fades`, `master_audio`, `audio_cleanup`,
-`verify_output`. Helpers `apply_crossfade` / `apply_ducking` /
+`verify_output`, `export_review_pack`, `fits_cap`. Helpers `apply_crossfade` / `apply_ducking` /
 `apply_timeline` / `render_with_preset` compose the RPCs above. The FFmpeg
 backend implements the same RPC names and encodes on `render.start`.
 
