@@ -49,6 +49,10 @@ edits.
    and a speech-boundary re-check (chopped words at joins).
    `check_loop` / `rushcut check-loop` for Shorts: SSIM of the last frames
    vs frame 1, plus audio-level continuity across the wrap.
+   After a re-render of an approved cut, `rushcut check --parity APPROVED
+   CANDIDATE --json parity.json` (optional `--edit-region`, `--region`,
+   `--time-map`, `--presence-region`, `--with-loop`, `--with-loudness`).
+   Exit 0/1. Do not redirect stdout for the JSON.
 
 ## Story formats & pacing
 

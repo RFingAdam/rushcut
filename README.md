@@ -201,6 +201,7 @@ VOD when a local recording was available.
 rushcut check edit.json --profile edit_profile.yaml --transcript transcript.json
 rushcut check edit.json --must-include '[{"t":12,"pre":1,"post":1,"id":"event_a"}]'
 rushcut check out/render.mp4 --profile edit_profile.yaml --loop --check-media
+rushcut check --parity approved.mp4 candidate.mp4 --json parity.json
 rushcut check edit.json --envelope envelope.json --transcript transcript.json
 rushcut check-seams --cuts cuts.json --mic-audio mic.wav --transcript transcript.json
 rushcut snap-cuts --cuts cuts.json --envelope envelope.json --max-total-seconds 30
@@ -244,6 +245,20 @@ required event's `[t-pre, t+post]` window is not on the cut timeline.
 `check_loop` reports SSIM of the last frames vs frame 1 and the dB jump
 across the audio wrap. `check_media` returns integrated LUFS, true peak,
 duration and fps, and re-checks speech boundaries on the render.
+
+`rushcut check --parity APPROVED CANDIDATE` is the layout-parity gate for
+a re-render of an approved cut. It samples frames (default 24, minimum 20),
+maps each candidate time through `--time-map cand_t0,cand_t1,offset`
+(identity if omitted), and scores named `--region name=x0,y0,x1,y1`
+rects with 7×7 luma SSIM and mean absolute difference. `--edit-region
+x0,y0,x1,y1,t0,t1` masks an intentional change only during that span.
+`--presence-region` fails when the approved frame has content (luma std
+> 10) in that rect and the candidate does not. A candidate frame with no
+approved counterpart is `no_counterpart` and fails unless `--allow-new
+SECONDS` covers it. `--seek-tolerance 1` picks the best match within ±1
+approved frame at a trim seam. `--json PATH` writes the report; do not
+redirect stdout. Exit `0` on pass, `1` on fail. `--with-loop` /
+`--with-loudness` chain the existing loop-seam and loudness checks.
 
 `check_seams` scores every in/out against a mic envelope (audio file or
 `[{at_seconds, dbfs}]`) and word timestamps: dBFS at the cut, local

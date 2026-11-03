@@ -5,6 +5,7 @@ from .delivery import check_duration_cap, check_frame1_not_black, stream_max_dur
 from .features import check_required_features, collect_applied_features
 from .loop import check_loop, check_loop_audio, check_loop_video
 from .media import check_media, output_join_times
+from .parity import check_parity, format_parity_report
 from .ramps import check_speed_ramps, extract_ramp_steps
 from .seams import check_seams, format_seams_markdown, lf_352_boundary_spec, snap_cuts
 from .sources import check_source_preference, classify_source
@@ -23,6 +24,7 @@ __all__ = [
     "check_loop_video",
     "check_media",
     "check_must_include",
+    "check_parity",
     "check_required_features",
     "check_seams",
     "check_source_preference",
@@ -34,6 +36,7 @@ __all__ = [
     "coverage_ranges_from_cuts",
     "cut_points_from_cuts",
     "extract_ramp_steps",
+    "format_parity_report",
     "format_report",
     "format_seams_markdown",
     "lf_352_boundary_spec",

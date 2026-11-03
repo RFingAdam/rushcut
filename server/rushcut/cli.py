@@ -14,7 +14,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rushcut",
         description=(
-            "Rushcut CLI. Quality checks: `rushcut check`. "
+            "Rushcut CLI. Quality checks: `rushcut check` "
+            "(layout parity: `rushcut check --parity APPROVED CANDIDATE`). "
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
             "`check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
             "`plan-story-edit`, `measure-pacing`, `fits-cap`. "
@@ -77,9 +78,83 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="check_media_output",
         help="Also run check_media (LUFS, duration, fps, chopped words on the render)",
     )
+    check.add_argument(
+        "--parity",
+        metavar="APPROVED",
+        help="Approved cut to compare the candidate against (layout-parity gate)",
+    )
+    check.add_argument(
+        "--edit-region",
+        action="append",
+        default=None,
+        dest="edit_region",
+        help="Mask x0,y0,x1,y1,t0,t1 (repeatable; pixels ignored only in that span)",
+    )
+    check.add_argument(
+        "--region",
+        action="append",
+        default=None,
+        dest="parity_region",
+        help="Named compare rect name=x0,y0,x1,y1 (repeatable)",
+    )
+    check.add_argument(
+        "--time-map",
+        action="append",
+        nargs="+",
+        default=None,
+        dest="time_map",
+        help="Candidate-to-approved map cand_t0,cand_t1,offset (repeatable)",
+    )
+    check.add_argument(
+        "--samples",
+        type=int,
+        default=None,
+        help="Parity sample count (default 24, minimum 20)",
+    )
+    check.add_argument("--ssim-min", type=float, default=None, dest="parity_ssim_min")
+    check.add_argument("--mad-max", type=float, default=None)
+    check.add_argument(
+        "--presence-region",
+        action="append",
+        default=None,
+        dest="presence_region",
+        help="Fail if this named region has content on the approved frame and not the candidate",
+    )
+    check.add_argument(
+        "--allow-new",
+        type=float,
+        default=None,
+        dest="allow_new",
+        help="Seconds of candidate-only tail (no_counterpart) to allow",
+    )
+    check.add_argument(
+        "--seek-tolerance",
+        type=int,
+        default=None,
+        dest="seek_tolerance",
+        help="Search ±N approved frames for the best match at a trim seam",
+    )
+    check.add_argument(
+        "--with-loop",
+        action="store_true",
+        help="With --parity, also run the loop-seam check on the candidate",
+    )
+    check.add_argument(
+        "--with-loudness",
+        action="store_true",
+        help="With --parity, also run the loudness / check_media probe on the candidate",
+    )
     check.add_argument("--envelope", help="Mic envelope JSON or audio path")
     check.add_argument("--mic-audio", dest="mic_audio", help="Isolated mic audio for seam scoring")
-    check.add_argument("--json", action="store_true", dest="as_json", help="Print JSON report")
+    check.add_argument(
+        "--json",
+        nargs="?",
+        const=True,
+        default=None,
+        dest="json_out",
+        metavar="PATH",
+        help="Write JSON to PATH, or print JSON when PATH is omitted",
+    )
 
     seams = sub.add_parser("check-seams", help="Score each cut against the mic envelope and word times")
     seams.add_argument("--cuts", required=True, help="JSON cut list or edit.json")
@@ -223,7 +298,68 @@ def _print_json(result: Any) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _emit_json(result: Any, json_out: Any) -> None:
+    if not json_out:
+        return
+    if json_out is True:
+        _print_json(result)
+        return
+    from pathlib import Path
+
+    path = Path(str(json_out))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+
+def _cmd_check_parity(args: argparse.Namespace) -> int:
+    from .quality.parity import check_parity, format_parity_report
+
+    if not args.target:
+        print("rushcut check: error: candidate is required with --parity", file=sys.stderr)
+        return 1
+    kwargs: dict[str, Any] = {
+        "approved": args.parity,
+        "candidate": args.target,
+        "edit_regions": args.edit_region,
+        "regions": args.parity_region,
+        "time_map": args.time_map,
+        "presence_region": args.presence_region,
+        "with_loop": bool(args.with_loop or args.loop),
+        "with_loudness": bool(args.with_loudness or args.check_media_output),
+    }
+    if args.samples is not None:
+        kwargs["samples"] = args.samples
+    if args.parity_ssim_min is not None:
+        kwargs["ssim_min"] = args.parity_ssim_min
+    if args.mad_max is not None:
+        kwargs["mad_max"] = args.mad_max
+    if args.allow_new is not None:
+        kwargs["allow_new"] = args.allow_new
+    if args.seek_tolerance is not None:
+        kwargs["seek_tolerance"] = args.seek_tolerance
+    json_out = args.json_out
+    if isinstance(json_out, str):
+        kwargs["json_path"] = json_out
+    try:
+        result = check_parity(**kwargs)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"rushcut check: error: {exc}", file=sys.stderr)
+        return 1
+    if result.get("error") and not result.get("regions"):
+        print(f"rushcut check: error: {result.get('error')}", file=sys.stderr)
+        return 1
+    if json_out is True:
+        _print_json(result)
+    else:
+        sys.stdout.write(format_parity_report(result))
+        if isinstance(json_out, str) and not result.get("json_path"):
+            _emit_json(result, json_out)
+    return 0 if result.get("ok") else 1
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
+    if getattr(args, "parity", None):
+        return _cmd_check_parity(args)
     try:
         result = run_checks(
             target=args.target,
@@ -245,8 +381,12 @@ def _cmd_check(args: argparse.Namespace) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"rushcut check: error: {exc}", file=sys.stderr)
         return 1
-    if args.as_json:
-        _print_json(result)
+    if args.json_out:
+        if args.json_out is True:
+            _print_json(result)
+        else:
+            _emit_json(result, args.json_out)
+            _print_json(result)
     else:
         sys.stdout.write(format_report(result))
     if not result.get("ok"):
