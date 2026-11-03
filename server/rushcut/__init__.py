@@ -989,6 +989,48 @@ def verify_output(
 
 
 @mcp.tool()
+def check_parity(
+    approved: str,
+    candidate: str,
+    edit_regions: list | dict | str | None = None,
+    regions: list | dict | str | None = None,
+    time_map: list | dict | str | None = None,
+    samples: int = 24,
+    ssim_min: float = 0.95,
+    mad_max: float = 3.0,
+    presence_region: list | str | None = None,
+    allow_new: float = 0.0,
+    seek_tolerance: int = 0,
+    with_loop: bool = False,
+    with_loudness: bool = False,
+    json_path: str | None = None,
+) -> dict:
+    """Compare a candidate re-render to an approved cut (SSIM/MAD layout parity).
+
+    `rushcut check --parity APPROVED CANDIDATE` is the CLI. Writes JSON to
+    json_path when given; never rely on shell redirection.
+    """
+    from .quality.parity import check_parity as _parity
+
+    return _parity(
+        approved,
+        candidate,
+        edit_regions=edit_regions,
+        regions=regions,
+        time_map=time_map,
+        samples=samples,
+        ssim_min=ssim_min,
+        mad_max=mad_max,
+        presence_region=presence_region,
+        allow_new=allow_new,
+        seek_tolerance=seek_tolerance,
+        with_loop=with_loop,
+        with_loudness=with_loudness,
+        json_path=json_path,
+    )
+
+
+@mcp.tool()
 def check_output(
     target: str | None = None,
     profile: str | None = None,
