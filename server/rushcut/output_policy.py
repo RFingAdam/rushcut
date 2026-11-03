@@ -224,15 +224,18 @@ def _warn_unrestricted() -> None:
     log.warning("No output_roots configured; writes are unrestricted")
 
 
-def check_output_path(path: str | None, *, kind: str = "output") -> dict[str, Any] | None:
+def check_output_path(
+    path: str | None, *, kind: str = "output", profile: Any | None = None
+) -> dict[str, Any] | None:
     """Return an ``{ok:false}`` dict when *path* is outside allowed roots.
 
     ``None`` means the write may proceed. Unrestricted policy also returns
-    ``None`` (after the one-line warning).
+    ``None`` (after the one-line warning). Pass ``profile`` to evaluate a
+    specific edit profile without pinning it as the process-wide active one.
     """
     if not path:
         return None
-    policy = current_policy()
+    policy = current_policy(profile=profile)
     roots = policy.work_roots if kind == "work" else policy.output_roots
     if not roots:
         _warn_unrestricted()
@@ -242,11 +245,13 @@ def check_output_path(path: str | None, *, kind: str = "output") -> dict[str, An
     return {"ok": False, "error": OUTSIDE_ROOTS, "path": str(path), "roots": list(roots)}
 
 
-def require_output_path(path: str | None, *, kind: str = "output") -> dict[str, Any] | None:
+def require_output_path(
+    path: str | None, *, kind: str = "output", profile: Any | None = None
+) -> dict[str, Any] | None:
     """Like :func:`check_output_path` but also rejects empty paths."""
     if not path:
         return {"ok": False, "error": "output_path is required"}
-    return check_output_path(path, kind=kind)
+    return check_output_path(path, kind=kind, profile=profile)
 
 
 def work_parent() -> str | None:

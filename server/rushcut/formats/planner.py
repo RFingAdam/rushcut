@@ -555,3 +555,132 @@ def plan_story_edit(
         "warnings": warnings,
     }
     return result
+
+
+_START_KEYS = ("start_seconds", "start", "in_seconds", "in", "source_in")
+_END_KEYS = ("end_seconds", "end", "out_seconds", "out", "source_out")
+_SPEED_KEYS = ("speed", "rate", "playback_rate", "speed_factor")
+DEFAULT_CAP_SECONDS = 30.0
+DEFAULT_CAP_FPS = 30.0
+
+
+def _first_num(item: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        if key in item and item[key] is not None:
+            try:
+                return float(item[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _segments_from_spec(spec: Any) -> list[dict[str, Any]]:
+    if spec is None:
+        return []
+    if isinstance(spec, dict):
+        for key in ("segments", "clips", "events", "cuts"):
+            if key in spec and spec[key] is not None:
+                return _segments_from_spec(spec[key])
+        return [spec]
+    if isinstance(spec, list):
+        out: list[dict[str, Any]] = []
+        for item in spec:
+            if isinstance(item, dict):
+                out.append(item)
+        return out
+    return []
+
+
+def _source_span(segment: dict[str, Any]) -> float:
+    start = _first_num(segment, _START_KEYS)
+    end = _first_num(segment, _END_KEYS)
+    if start is not None and end is not None:
+        return max(0.0, end - start)
+    length = _first_num(segment, ("length_seconds", "duration_seconds", "length", "source_seconds"))
+    if length is not None:
+        return max(0.0, length)
+    return 0.0
+
+
+def _ramp_output_seconds(source_seconds: float, keypoints: list[dict[str, Any]]) -> float:
+    """Integrate dt_source / speed along a piecewise-linear speed ramp."""
+    if source_seconds <= 0:
+        return 0.0
+    points: list[tuple[float, float]] = []
+    for raw in keypoints:
+        if not isinstance(raw, dict):
+            continue
+        at = _first_num(raw, ("at_seconds", "at", "t", "source_seconds"))
+        speed = _first_num(raw, _SPEED_KEYS)
+        if at is None or speed is None:
+            continue
+        points.append((at, max(1e-6, speed)))
+    if not points:
+        return source_seconds
+    points.sort()
+    if points[0][0] > 0:
+        points.insert(0, (0.0, points[0][1]))
+    if points[-1][0] < source_seconds:
+        points.append((source_seconds, points[-1][1]))
+    total = 0.0
+    for (t0, s0), (t1, s1) in zip(points, points[1:]):
+        span = t1 - t0
+        if span <= 0:
+            continue
+        if abs(s1 - s0) < 1e-9:
+            total += span / s0
+        else:
+            total += span * math.log(s1 / s0) / (s1 - s0)
+    return total
+
+
+def _segment_output_seconds(segment: dict[str, Any]) -> float:
+    source = _source_span(segment)
+    ramp = segment.get("speed_ramp") or segment.get("ramp") or segment.get("speed_keyframes")
+    if isinstance(ramp, list) and ramp:
+        return _ramp_output_seconds(source, ramp)
+    speed = _first_num(segment, _SPEED_KEYS)
+    if speed is None:
+        speed = 1.0
+    speed = max(1e-6, float(speed))
+    return source / speed
+
+
+def predicted_output_seconds(spec: Any) -> float:
+    """Output timeline length from a segment spec, including speed ramps."""
+    return sum(_segment_output_seconds(seg) for seg in _segments_from_spec(spec))
+
+
+def fits_cap(spec: Any, max_seconds: float | None = None, fps: float | None = None) -> dict[str, Any]:
+    """Predict output duration from a segment spec and compare it to a cap.
+
+    Speed ramps are integrated as piecewise-linear ``source / speed``. The
+    prediction is intended to land within ±1 frame of a later render so trims
+    can be planned before encode.
+    """
+    payload = spec if isinstance(spec, dict) else {"segments": spec}
+    if max_seconds is None:
+        shorts = payload.get("shorts") if isinstance(payload, dict) else None
+        if isinstance(shorts, dict) and shorts.get("max_seconds") is not None:
+            max_seconds = float(shorts["max_seconds"])
+        else:
+            raw = payload.get("max_seconds") if isinstance(payload, dict) else None
+            max_seconds = float(raw) if raw is not None else DEFAULT_CAP_SECONDS
+    if fps is None:
+        raw_fps = payload.get("fps") if isinstance(payload, dict) else None
+        fps = float(raw_fps) if raw_fps else DEFAULT_CAP_FPS
+    fps = float(fps) if fps and float(fps) > 0 else DEFAULT_CAP_FPS
+    frame = 1.0 / fps
+    predicted = predicted_output_seconds(spec)
+    limit = float(max_seconds)
+    fits = predicted < limit
+    return {
+        "ok": True,
+        "fits": fits,
+        "predicted_seconds": round(predicted, 6),
+        "max_seconds": limit,
+        "fps": fps,
+        "frame_seconds": frame,
+        "over_seconds": round(predicted - limit, 6),
+        "within_one_frame": abs(predicted - round(predicted / frame) * frame) <= frame + 1e-9,
+    }

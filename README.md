@@ -160,7 +160,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-79 tools, generated from the server's registered tool list. Tool names are
+81 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -174,9 +174,9 @@ reason instead of raising.
 | Mixing and transitions (3) | `set_envelope_points`, `apply_crossfade`, `apply_ducking` |
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
-| Render and delivery (7) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar` |
+| Render and delivery (8) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack` |
 | Analysis, no NLE needed (7) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
-| Quality, no NLE needed (7) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps` |
+| Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
 | File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
@@ -293,7 +293,21 @@ sources:
 quality:
   gate: strict
   speech_boundary: {pad_seconds: 0.12, mode: fail}
+shorts:
+  max_seconds: 30.0
+  loop: true
+output_roots:
+  - D:\\MediaOut
+work_roots:
+  - D:\\MediaOut
 ```
+
+A `shorts:` block (or a profile id that contains `shorts`) turns on
+`duration_cap`, `loop_video`, `loop_audio`, and `frame1_not_black`. Results
+are written to `report.json` next to the target. `fits_cap(spec)` predicts
+output duration from a segment list, including speed ramps, so trims can be
+planned before render. `export_review_pack` writes 720p/1 Mbps proxies, a
+contact sheet, and `QA.md` under an allowed output root; finals are only read.
 
 `required_features` must show up on the edit (`applied_features`, captions
 block, sidecar artifacts, or `rushcut check --applied captions,...`). A
