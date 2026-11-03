@@ -22,6 +22,7 @@ from .pcm import (
     mix_into,
     ok_path,
     raised_cosine,
+    refuse_output,
     rms_db,
 )
 from .probe import probe_media
@@ -101,6 +102,9 @@ def add_music_bed(
     sidechain = duck_under or onto
     if not output_path:
         output_path = default_output(onto or path, "bed")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     try:
         bed, sr, ch = decode_pcm(path)
         if onto:
@@ -248,6 +252,9 @@ def bleep_spans(
         return {"ok": False, "error": "spans is required"}
     if not output_path:
         output_path = default_output(path, "bleep")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     mode_l = (mode or "tone").lower()
     if mode_l not in {"tone", "mute", "reverse"}:
         return {"ok": False, "error": f"mode must be tone|mute|reverse, got {mode!r}"}
@@ -310,6 +317,9 @@ def insert_audio(
         return err
     if not output_path:
         output_path = default_output(path, "insert")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     shape = (ramp_shape or "raised_cosine").lower()
     if shape not in {"raised_cosine", "linear", "cosine"}:
         return {"ok": False, "error": f"unknown ramp_shape {ramp_shape!r}"}
@@ -405,6 +415,9 @@ def replace_audio_span(
             return err
     if not output_path:
         output_path = default_output(path, "replace")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     try:
         mix, sr, ch = decode_pcm(path)
         old, _, _ = decode_pcm(old_clip, sample_rate=sr, channels=ch)
@@ -479,6 +492,9 @@ def loop_fades(
         return err
     if not output_path:
         output_path = default_output(path, "loop")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     probe = probe_media(path)
     duration = float(probe.get("duration_seconds") or 0)
     fade_in = max(0.0, float(in_s))

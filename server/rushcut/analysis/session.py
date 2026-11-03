@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 from datetime import UTC, datetime
 from typing import Any
 
+from ..output_policy import check_output_path, make_work_dir, work_named_tempfile
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
 from .probe import probe_media
 
@@ -70,6 +70,9 @@ def repair_media(path: str, output_path: str | None = None) -> dict[str, Any]:
     output_path = os.path.abspath(output_path)
     if os.path.normcase(output_path) == os.path.normcase(src):
         return {"ok": False, "error": "repair_media refuses to overwrite the source"}
+    refused = check_output_path(output_path)
+    if refused:
+        return refused
     parent = os.path.dirname(output_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -103,7 +106,7 @@ def repair_media(path: str, output_path: str | None = None) -> dict[str, Any]:
 
 
 def _concat_copy(paths: list[str], output_path: str) -> dict[str, Any]:
-    list_file = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+    list_file = work_named_tempfile(".txt")
     try:
         for p in paths:
             escaped = p.replace("\\", "/").replace("'", r"'\''")
@@ -256,7 +259,7 @@ def stitch_session(
         did_remux = False
         if remux_unfinalized and is_unfinalized(probe):
             if tmp_dir is None:
-                tmp_dir = tempfile.mkdtemp(prefix="rushcut-session-")
+                tmp_dir = make_work_dir("rushcut-session-")
             repaired_path = os.path.join(tmp_dir, f"{order}{os.path.splitext(src)[1] or '.mkv'}")
             repaired = repair_media(src, repaired_path)
             if not repaired.get("ok"):
@@ -321,6 +324,9 @@ def stitch_session(
     }
 
     if output_path:
+        refused = check_output_path(output_path)
+        if refused:
+            return refused
         output_path = os.path.abspath(output_path)
         parent = os.path.dirname(output_path)
         if parent:

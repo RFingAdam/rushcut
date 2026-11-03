@@ -38,7 +38,11 @@ edits.
    - `generate_captions` (chunking, mask, `active_word`) then `burn_captions`, or `add_title`
    - `audio_cleanup` for hum / tonal whine; `master_audio` before delivery
 5. `render_with_preset` (`1080p`, `vertical`, `4k`, optional `master=true`) or `render_start`.
-6. `verify_output` on the file, then `check_output` (or `rushcut check`)
+   Encodes write `<name>.partial.mp4` and rename only after a full-decode
+   QA. Honor `RUSHCUT_OUTPUT_ROOTS` / profile `output_roots` — never
+   render to `C:` when a D: edit root is configured.
+6. `verify_output` on the file (`moov_ok`, `decode_errors`, `md5`), then
+   `check_output` (or `rushcut check`)
    with the profile, transcript, and cut list. Speech-boundary, required
    features, and source-preference failures are not silent.
    `check_media` on the render: integrated LUFS, true peak, duration, fps,
@@ -72,11 +76,17 @@ These tools never rank footage; you choose the beats.
 - Times are seconds, not ticks.
 - Soft failures are `{ok: false, error}` — never assume success.
 - Do not cut inside a word. Snap in/out to silence with the profile pad
-  (`quality.speech_boundary.pad_seconds`). Keep a conversation partner's
+  (`quality.speech_boundary.pad_seconds`). `check_seams` / `snap_cuts`
+  score the mic envelope and move voiced seams to the nearest dip
+  without dropping covered words. Keep a conversation partner's
   reply if it starts within `turn_completeness.reply_window_seconds`.
+- Do not let a speed ramp (speed ≠ 1) cover a word. `check_speed_ramps`
+  flags each 1/2/4/6x step; pad defaults to 80 ms. Bleeped words count.
 - Prefer `local_recording` over `platform_vod` when both exist.
 - Honor `required_features` from `edit_profile.yaml`; record what you
   applied on the edit (`applied_features`) so `check_output` can verify.
+- Honor `output_roots` / `RUSHCUT_OUTPUT_ROOTS`. A path outside those
+  roots returns `{ok:false, error:"output outside allowed roots"}`.
 - `find_highlights`, `apply_vertical_short`, and `propose_edit` are removed
   stubs. Do not call them for real work.
 - VEGAS extension mode needs `%LOCALAPPDATA%\vegas-director-mcp\token`.

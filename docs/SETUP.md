@@ -135,6 +135,9 @@ MCP server.
 | `VEGAS_HOST_PIPE_NAME` | `vegas-director` | Unused unless transport is `pipe` |
 | `VEGAS_HOST_TIMEOUT` | `60` | Seconds for ordinary RPCs (`project.save` / `new` / `open` / `render.start` use 1800) |
 | `VEGAS_HOST_TOKEN` | *(file)* | Override the extension token. Otherwise the client reads `%LOCALAPPDATA%\vegas-director-mcp\token` when that file exists. |
+| `RUSHCUT_OUTPUT_ROOTS` | unset | Allowed write roots (`;`-separated or JSON list). Unset = unrestricted + one warning. Example: `D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS` (never `C:`). |
+| `RUSHCUT_WORK_ROOTS` | first output root | Scratch dir for concat lists and ffmpeg intermediates. Defaults off `%TEMP%` / `C:\` when output roots are set. |
+| `RUSHCUT_PROFILE` | unset | `edit_profile.yaml` whose `output_roots` / `work_roots` are used when the env vars are empty. See [examples/windows-edits.edit_profile.yaml](examples/windows-edits.edit_profile.yaml). |
 
 ### MCP client snippet
 
@@ -151,7 +154,8 @@ Cursor / Claude Desktop-style config. Use the venv interpreter and the
       "env": {
         "VEGAS_HOST_TRANSPORT": "tcp",
         "VEGAS_HOST_ADDRESS": "127.0.0.1",
-        "VEGAS_HOST_PORT": "8752"
+        "VEGAS_HOST_PORT": "8752",
+        "RUSHCUT_OUTPUT_ROOTS": "D:\\Adam\\Videos\\ShadowPlay Videos\\Microsoft Flight Simulator\\OBS\\_EDITS"
       }
     }
   }

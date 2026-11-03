@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 from typing import Any, Callable, Iterator
 
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .pcm import default_output, decode_pcm, encode_pcm, ok_path
+from .pcm import default_output, decode_pcm, encode_pcm, ok_path, refuse_output
 from .probe import probe_media
 
 DEFAULT_BANDS_HZ = (
@@ -532,11 +531,16 @@ def audio_cleanup(
         return err
     if not output_path:
         output_path = default_output(path, "clean")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     notch_list = list(notches or [])
     parent = os.path.dirname(os.path.abspath(output_path))
     if parent:
         os.makedirs(parent, exist_ok=True)
-    tmp = tempfile.mkdtemp(prefix="rushcut-clean-")
+    from ..output_policy import make_work_dir
+
+    tmp = make_work_dir(prefix="rushcut-clean-")
     stage = os.path.join(tmp, "stage.wav")
     try:
         extra: dict[str, Any] = {"voice_separate": False}

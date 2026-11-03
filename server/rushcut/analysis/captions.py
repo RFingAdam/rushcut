@@ -11,7 +11,7 @@ import os
 import re
 from typing import Any
 
-from .ffmpeg_util import FfmpegError, run, which_ffmpeg
+from .ffmpeg_util import which_ffmpeg
 
 # Vertical shorts: short uppercase groups. Landscape allows a longer line.
 DEFAULT_MAX_WORDS = 4
@@ -541,6 +541,11 @@ def generate_captions(
         else:
             base = "captions"
     dest = output_dir or (os.path.dirname(os.path.abspath(path)) if path else os.getcwd())
+    from ..output_policy import check_output_path
+
+    refused = check_output_path(dest)
+    if refused:
+        return refused
     os.makedirs(dest, exist_ok=True)
     srt_path = os.path.join(dest, base + ".srt")
     ass_path = os.path.join(dest, base + ".ass")
@@ -631,22 +636,24 @@ def burn_captions(
     if fontsdir:
         fonts_esc = fontsdir.replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
         filt += f":fontsdir='{fonts_esc}'"
-    try:
-        run(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-hide_banner",
-                "-y",
-                "-i",
-                media_path,
-                "-vf",
-                filt,
-                "-c:a",
-                "copy",
-                output_path,
-            ],
-            timeout=300,
-        )
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True, "output_path": os.path.abspath(output_path), "ass_path": ass_path}
+    from ..render.atomic import run_ffmpeg_atomic
+
+    written = run_ffmpeg_atomic(
+        [
+            which_ffmpeg("ffmpeg"),
+            "-hide_banner",
+            "-y",
+            "-i",
+            media_path,
+            "-vf",
+            filt,
+            "-c:a",
+            "copy",
+        ],
+        output_path,
+        timeout=300,
+    )
+    if not written.get("ok"):
+        return written
+    written["ass_path"] = ass_path
+    return written

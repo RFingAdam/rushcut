@@ -232,6 +232,13 @@ def ok_path(path: str, label: str = "path") -> dict[str, Any] | None:
     return None
 
 
+def refuse_output(output_path: str | None) -> dict[str, Any] | None:
+    """Refuse writes outside #49's configured output roots."""
+    from ..output_policy import check_output_path
+
+    return check_output_path(output_path)
+
+
 def default_output(path: str, suffix: str) -> str:
     root, ext = os.path.splitext(path)
     return f"{root}.{suffix}{ext or '.wav'}"

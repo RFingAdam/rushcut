@@ -140,10 +140,20 @@ class FakeHost:
 @pytest.fixture(autouse=True)
 def _default_vegas_backend(monkeypatch):
     """Existing tests talk to the VEGAS session. Never attach to a live Resolve."""
+    from rushcut.output_policy import reset_policy_state
+    from rushcut.tools import reset_render_jobs
+
     monkeypatch.delenv("DIRECTOR_EDITOR", raising=False)
     monkeypatch.delenv("VEGAS_DIRECTOR_EDITOR", raising=False)
+    monkeypatch.delenv("RUSHCUT_OUTPUT_ROOTS", raising=False)
+    monkeypatch.delenv("RUSHCUT_WORK_ROOTS", raising=False)
+    monkeypatch.delenv("RUSHCUT_PROFILE", raising=False)
+    reset_policy_state()
+    reset_render_jobs()
     reset_backend()
     yield
+    reset_policy_state()
+    reset_render_jobs()
     reset_backend()
 
 

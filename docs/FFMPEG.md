@@ -42,7 +42,9 @@ File-level tools (no timeline required):
 | `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
 | `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke), optional burn-in |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize; `initial_prompt`) |
-| `check_output` / `rushcut check` | speech-boundary, must_include, required features, source preference |
+| `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference |
+| `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |
+| `check_speed_ramps` | flag speed ≠ 1 steps that cover a word |
 | `check_loop` / `rushcut check-loop` | SSIM last vs first, audio wrap |
 | `check_media` / `rushcut check-media` | LUFS, true peak, duration, fps, chopped words on the render |
 
@@ -59,8 +61,9 @@ set_project_video(1920, 1080, 24)
 add_track("video", "V1")
 add_video_event(0, r"/path/to/clip.mp4", 0.0, -1)
 trim_event(0, 0, length_seconds=5.0, take_offset_seconds=12.0)
-started = render_start(r"/path/to/out.mp4", async_render=True)
-wait_for_render(started["job_id"])
+# Prefer a configured root (RUSHCUT_OUTPUT_ROOTS / output_roots) over C:\out.
+started = render_start(r"/path/to/edits/out.mp4", async_render=True)
+wait_for_render(started["job_id"])  # decode-check, write out.qa.json, then rename
 ```
 
 Transport (`play` / `stop` / `seek`) is unsupported — there is no GUI.

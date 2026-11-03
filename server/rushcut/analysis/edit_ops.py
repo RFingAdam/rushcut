@@ -7,10 +7,10 @@ composition (tracks, fades, overlays) lives on the FFmpeg backend.
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Any
 
-from .ffmpeg_util import FfmpegError, run, which_ffmpeg
+from ..output_policy import check_output_path, make_work_dir, work_named_tempfile
+from .ffmpeg_util import which_ffmpeg
 from .probe import probe_media
 
 
@@ -22,10 +22,13 @@ def _ok_path(path: str, label: str = "path") -> dict[str, Any] | None:
     return None
 
 
-def _ensure_parent(path: str) -> None:
-    parent = os.path.dirname(os.path.abspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
+def _ffmpeg_out(cmd: list[str], output_path: str, *, timeout: float = 180) -> dict[str, Any]:
+    from ..render.atomic import run_ffmpeg_atomic
+
+    refused = check_output_path(output_path)
+    if refused:
+        return refused
+    return run_ffmpeg_atomic(cmd, output_path, timeout=timeout)
 
 
 def cut_media(
@@ -65,7 +68,7 @@ def cut_media(
             length_seconds = None
         else:
             pieces: list[str] = []
-            tmp_dir = tempfile.mkdtemp(prefix="rushcut-session-cut-")
+            tmp_dir = make_work_dir("rushcut-session-cut-")
             start_index = int(start_hit["index"])
             end_index = int(end_hit["index"])
             for index in range(start_index, end_index + 1):
@@ -107,33 +110,32 @@ def cut_media(
     if not output_path:
         root, ext = os.path.splitext(path)
         output_path = f"{root}.cut{ext or '.mp4'}"
-    _ensure_parent(output_path)
-    try:
-        run(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-hide_banner",
-                "-y",
-                "-ss",
-                f"{start:.6f}",
-                "-i",
-                path,
-                "-t",
-                f"{length:.6f}",
-                "-avoid_negative_ts",
-                "make_zero",
-                output_path,
-            ],
-            timeout=180,
-        )
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
+    written = _ffmpeg_out(
+        [
+            which_ffmpeg("ffmpeg"),
+            "-hide_banner",
+            "-y",
+            "-ss",
+            f"{start:.6f}",
+            "-i",
+            path,
+            "-t",
+            f"{length:.6f}",
+            "-avoid_negative_ts",
+            "make_zero",
+        ],
+        output_path,
+    )
+    if not written.get("ok"):
+        return written
     return {
         "ok": True,
         "output_path": os.path.abspath(output_path),
         "start_seconds": start,
         "end_seconds": start + length,
         "length_seconds": length,
+        "qa_path": written.get("qa_path"),
+        "verify": written.get("verify"),
     }
 
 
@@ -149,14 +151,13 @@ def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
         files.append(os.path.abspath(p))
     if not output_path:
         return {"ok": False, "error": "output_path is required"}
-    _ensure_parent(output_path)
-    list_file = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+    list_file = work_named_tempfile(".txt")
     try:
         for p in files:
             escaped = p.replace("\\", "/").replace("'", r"'\''")
             list_file.write(f"file '{escaped}'\n")
         list_file.close()
-        run(
+        written = _ffmpeg_out(
             [
                 which_ffmpeg("ffmpeg"),
                 "-hide_banner",
@@ -175,18 +176,19 @@ def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
                 "yuv420p",
                 "-c:a",
                 "aac",
-                output_path,
             ],
+            output_path,
             timeout=300,
         )
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
     finally:
         try:
             os.remove(list_file.name)
         except OSError:
             pass
-    return {"ok": True, "output_path": os.path.abspath(output_path), "count": len(files)}
+    if not written.get("ok"):
+        return written
+    written["count"] = len(files)
+    return written
 
 
 def reframe_media(
@@ -212,7 +214,6 @@ def reframe_media(
     if not output_path:
         root, ext = os.path.splitext(path)
         output_path = f"{root}.{width}x{height}{ext or '.mp4'}"
-    _ensure_parent(output_path)
     # Cover the zoomed canvas, then crop WxH. pan -1..1 shifts the crop window.
     vf = (
         f"scale={width * zoom}:{height * zoom}:force_original_aspect_ratio=increase,"
@@ -238,11 +239,9 @@ def reframe_media(
         cmd.extend(["-c:a", "aac"])
     else:
         cmd.extend(["-an"])
-    cmd.append(output_path)
-    try:
-        run(cmd, timeout=180)
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
+    written = _ffmpeg_out(cmd, output_path)
+    if not written.get("ok"):
+        return written
     return {
         "ok": True,
         "output_path": os.path.abspath(output_path),
@@ -251,6 +250,8 @@ def reframe_media(
         "scale": zoom,
         "pan_x": px,
         "pan_y": py,
+        "qa_path": written.get("qa_path"),
+        "verify": written.get("verify"),
     }
 
 
@@ -266,19 +267,18 @@ def mix_audio(paths: list[str], output_path: str, normalize_mix: bool = False) -
         files.append(os.path.abspath(p))
     if not output_path:
         return {"ok": False, "error": "output_path is required"}
-    _ensure_parent(output_path)
     cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-y"]
     for p in files:
         cmd.extend(["-i", p])
     n = len(files)
     labels = "".join(f"[{i}:a]" for i in range(n))
     mix = f"{labels}amix=inputs={n}:duration=longest:normalize={'1' if normalize_mix else '0'}[a]"
-    cmd.extend(["-filter_complex", mix, "-map", "[a]", "-c:a", "aac", output_path])
-    try:
-        run(cmd, timeout=180)
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True, "output_path": os.path.abspath(output_path), "count": n}
+    cmd.extend(["-filter_complex", mix, "-map", "[a]", "-c:a", "aac"])
+    written = _ffmpeg_out(cmd, output_path)
+    if not written.get("ok"):
+        return written
+    written["count"] = n
+    return written
 
 
 def normalize_audio(
@@ -293,7 +293,6 @@ def normalize_audio(
     if not output_path:
         root, ext = os.path.splitext(path)
         output_path = f"{root}.norm{ext or '.mp4'}"
-    _ensure_parent(output_path)
     probe = probe_media(path)
     if not probe.get("has_audio"):
         return {"ok": False, "error": "no audio stream to normalize", "path": path}
@@ -301,13 +300,9 @@ def normalize_audio(
     cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-y", "-i", path, "-af", af]
     if probe.get("has_video"):
         cmd.extend(["-c:v", "copy"])
-    cmd.extend(["-c:a", "aac", output_path])
-    try:
-        run(cmd, timeout=180)
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {
-        "ok": True,
-        "output_path": os.path.abspath(output_path),
-        "integrated_lufs": float(integrated_lufs),
-    }
+    cmd.extend(["-c:a", "aac"])
+    written = _ffmpeg_out(cmd, output_path)
+    if not written.get("ok"):
+        return written
+    written["integrated_lufs"] = float(integrated_lufs)
+    return written

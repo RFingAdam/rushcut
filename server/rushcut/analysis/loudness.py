@@ -12,11 +12,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 from typing import Any
 
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .pcm import default_output, mux_audio_onto_video, ok_path
+from .pcm import default_output, mux_audio_onto_video, ok_path, refuse_output
 from .probe import probe_media
 
 _I_RE = re.compile(r"\bI:\s*([+-]?\d+(?:\.\d+)?)\s*LUFS", re.IGNORECASE)
@@ -380,6 +379,9 @@ def master_audio(
         return err
     if not output_path:
         output_path = default_output(path, "master")
+    refused = refuse_output(output_path)
+    if refused:
+        return refused
     probe = probe_media(path)
     if not probe.get("has_audio"):
         return {"ok": False, "error": "no audio stream to master", "path": path}
@@ -392,7 +394,9 @@ def master_audio(
     if not incoming.get("ok"):
         return incoming
 
-    tmpdir = tempfile.mkdtemp(prefix="rushcut-master-")
+    from ..output_policy import make_work_dir
+
+    tmpdir = make_work_dir(prefix="rushcut-master-")
     measured_wav = os.path.join(tmpdir, "norm.wav")
     aac_path = os.path.join(tmpdir, "probe.m4a")
     try:

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..analysis.probe import probe_media
+from ..output_policy import check_output_path
 
 SIDECAR_KEYS = (
     "length",
@@ -30,11 +31,37 @@ def verify_output(
     expect_audio: bool = True,
     duration_tolerance: float = 0.6,
     expect_duration: float | None = None,
+    decode: bool = True,
 ) -> dict[str, Any]:
+    """ffprobe + optional full-decode QA.
+
+    Always returns ``moov_ok``, ``decode_errors`` and ``md5``. ``ok`` is
+    false when the moov atom is missing or the decode reports errors, even
+    if the other expectation checks pass.
+    """
+    from .atomic import count_decode_errors, file_md5, has_moov_atom
+
     probe = probe_media(path)
-    if not probe.get("ok"):
-        return probe
+    md5 = file_md5(path)
+    moov_ok = bool(probe.get("ok")) and has_moov_atom(path)
+    if probe.get("unfinalized_container") or probe.get("header_duration_missing"):
+        moov_ok = False
+    decode_errors = 0
+    if decode and os.path.isfile(path):
+        decode_errors = count_decode_errors(path)
+    elif not os.path.isfile(path):
+        decode_errors = 1
     problems: list[str] = []
+    if not probe.get("ok"):
+        if probe.get("error"):
+            problems.append(str(probe.get("error")))
+        result = dict(probe)
+        result["ok"] = False
+        result["moov_ok"] = moov_ok
+        result["decode_errors"] = decode_errors
+        result["md5"] = md5
+        result["problems"] = problems
+        return result
     if expect_audio and not probe.get("has_audio"):
         problems.append("no audio stream")
     if expect_width and int(probe.get("width") or 0) != expect_width:
@@ -45,15 +72,25 @@ def verify_output(
         got = float(probe.get("duration_seconds") or 0)
         if abs(got - expect_duration) > duration_tolerance:
             problems.append(f"duration {got:.2f}s != {expect_duration:.2f}s ±{duration_tolerance}")
+    if not moov_ok:
+        problems.append("missing moov atom")
+    if decode_errors > 0:
+        problems.append(f"{decode_errors} decode error(s)")
     return {
         "ok": not problems,
         "path": probe.get("path"),
         "probe": probe,
         "problems": problems,
+        "moov_ok": moov_ok,
+        "decode_errors": decode_errors,
+        "md5": md5,
     }
 
 
 def write_sidecar(output_path: str, edit_meta: dict[str, Any] | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    refused = check_output_path(output_path)
+    if refused:
+        return refused
     meta = {k: (edit_meta or {}).get(k) for k in SIDECAR_KEYS}
     # Accept a few aliases from callers.
     if meta["length"] is None:
