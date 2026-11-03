@@ -456,6 +456,63 @@ def normalize_audio(
 
 
 @mcp.tool()
+def list_story_formats(summary_only: bool = False) -> dict:
+    """Game-agnostic long-form story formats: titles, thumbnail, 0-15 s hook, spine, pacing targets. No NLE."""
+    from .formats import list_story_formats as _list
+
+    return _list(summary_only=summary_only)
+
+
+@mcp.tool()
+def plan_story_edit(
+    format_id: str,
+    beats: list[dict[str, Any]],
+    target_minutes: float,
+    slots: dict[str, Any] | None = None,
+    vo_gap_seconds: float = 8.0,
+    max_sections: int | None = None,
+) -> dict:
+    """Beat sheet from footage beats [{t_sec, label, value?}]: cold open, sections ending on values, YouTube chapters, VO slots, titles. No NLE."""
+    from .formats import plan_story_edit as _plan
+
+    return _plan(
+        format_id,
+        beats,
+        target_minutes,
+        slots=slots,
+        vo_gap_seconds=vo_gap_seconds,
+        max_sections=max_sections,
+    )
+
+
+@mcp.tool()
+def chapters_from_beats(
+    beats: list[dict[str, Any]],
+    total_seconds: float | None = None,
+    min_chapter_seconds: float = 10.0,
+    intro_title: str = "Intro",
+) -> dict:
+    """YouTube chapters from edited-timeline beats [{t_sec, label, value?}]: first at 0:00, 3+, each 10 s+. No NLE."""
+    from .formats import chapters_from_beats as _chapters
+
+    return _chapters(beats, total_seconds, min_chapter_seconds, intro_title)
+
+
+@mcp.tool()
+def measure_pacing(
+    media_path: str,
+    dead_threshold_s: float = 8.0,
+    promise_keywords: list[str] | None = None,
+    model_size: str = "base",
+    language: str | None = "en",
+) -> dict:
+    """Narration pacing via local Whisper: wpm, dead stretches, longest gap, words in first 15 s, time to promise. No NLE."""
+    from .analysis.pacing import measure_pacing as _pacing
+
+    return _pacing(media_path, dead_threshold_s, promise_keywords, model_size, language)
+
+
+@mcp.tool()
 def find_highlights(
     path: str,
     min_seconds: float = 20.0,
