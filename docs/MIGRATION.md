@@ -66,9 +66,9 @@ Use `probe_media`, `detect_scenes`, `analyze_audio`, `cut_media`,
 `concat_media`, `reframe_media`, `generate_captions`, and the shared
 timeline tools instead.
 
-`generate_captions` default style is `default` (16:9). `vertical` is a
-generic 9:16 layout. `shorts` is accepted as a deprecated alias of
-`vertical`.
+`generate_captions` default style is `default` (16:9, MarginV 40).
+`vertical` is a generic 9:16 layout (MarginV 160, 18-character / 4-word
+chunks). `shorts` is accepted as a deprecated alias of `vertical`.
 
 `analyze_audio` still returns windowed RMS/peak spikes. Spike `kind` values
 are `peak` / `loud` / `rise` — not game-specific labels.

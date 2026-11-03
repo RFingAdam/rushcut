@@ -101,11 +101,14 @@ MCP tool names are the Python functions in
 over the RPC names above. See [API_COVERAGE.md](API_COVERAGE.md).
 
 Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
-`transcribe_media`, `check_output`, `validate_profile`, `generate_captions`, `burn_captions`, `cut_media`,
+`analyze_noise_floor`, `transcribe_media`, `check_output`, `validate_profile`,
+`generate_captions`, `burn_captions`, `cut_media`,
 `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`,
+`add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`,
+`loop_fades`, `master_audio`, `audio_cleanup`,
 `verify_output`. Helpers `apply_crossfade` / `apply_ducking` /
-`render_with_preset` compose the RPCs above. The FFmpeg backend implements
-the same RPC names and encodes on `render.start`.
+`apply_timeline` / `render_with_preset` compose the RPCs above. The FFmpeg
+backend implements the same RPC names and encodes on `render.start`.
 
 ## Threading
 

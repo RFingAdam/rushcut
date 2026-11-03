@@ -32,9 +32,12 @@ edits.
    - `set_project_video` if the frame size should change
    - `add_track` → `place_media` / `add_video_event` / `add_audio_event`
    - `trim_event`, `move_event`, `set_event_fades`, `set_motion_keyframes`
-   - `apply_crossfade` on joins; `apply_ducking` for music under voice
-   - `generate_captions` then `burn_captions`, or `add_title`
-5. `render_with_preset` (`1080p`, `vertical`, `4k`) or `render_start`.
+   - `apply_crossfade` on joins; `apply_ducking` or `add_music_bed` for music under voice
+   - `insert_audio` / `replace_audio_span` for VO lines; `bleep_spans` with caption `masked_spans`
+   - `loop_fades(in_s=0.2, out_s=0.2)` when the short should wrap
+   - `generate_captions` (chunking, mask, `active_word`) then `burn_captions`, or `add_title`
+   - `audio_cleanup` for hum / tonal whine; `master_audio` before delivery
+5. `render_with_preset` (`1080p`, `vertical`, `4k`, optional `master=true`) or `render_start`.
 6. `verify_output` on the file, then `check_output` (or `rushcut check`)
    with the profile, transcript, and cut list. Speech-boundary, required
    features, and source-preference failures are not silent.
