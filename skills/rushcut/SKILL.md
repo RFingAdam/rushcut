@@ -1,6 +1,6 @@
 ---
 name: rushcut-mcp
-description: Drive an editor-agnostic MCP video-edit bridge (FFmpeg, VEGAS Pro, or DaVinci Resolve Studio). Use when probing media, building a timeline, trimming, mixing audio, burning captions, reframing, rendering, planning a long-form story format, or measuring narration pacing.
+description: Drive an editor-agnostic MCP video-edit bridge (FFmpeg, VEGAS Pro, or DaVinci Resolve Studio). Use when probing media, stitching a recording session, detecting overlay presence, building a timeline, trimming, mixing audio, burning captions, reframing, rendering, planning a long-form story format, measuring narration pacing, or checking a render.
 ---
 
 # rushcut-mcp
@@ -14,11 +14,18 @@ edits.
 
 ## Typical flow
 
-1. `probe_media` on the source.
+1. `probe_media` on the source. Split recordings: `stitch_session` groups
+   files by gap, remuxes unfinalized MKVs, and returns an offset map.
+   `cut_media` / `transcribe_media` / `detect_region_presence` accept
+   session time via `offset_map` + `session_start` / `session_seconds`.
 2. Optional: `detect_scenes`, `analyze_audio`, `transcribe_media`
    (word timestamps; optional `diarize` or injected speaker `turns`).
+   `detect_region_presence(path, box, mode=auto|face|activity)` for a cam
+   or overlay box (CPU Haar, or variance/edge activity if OpenCV is missing).
 3. Decide in/out points yourself (this skill does not rank clips).
    Validate them with `check_output` / `rushcut check` before render.
+   Pass `must_include: [{t, pre, post, id}]` so required events stay on
+   the cut timeline.
 4. `cut_media` / `concat_media` / `reframe_media` for file-level jobs, **or**
    build a timeline:
    - `new_project` or `open_project`
@@ -31,6 +38,10 @@ edits.
 6. `verify_output` on the file, then `check_output` (or `rushcut check`)
    with the profile, transcript, and cut list. Speech-boundary, required
    features, and source-preference failures are not silent.
+   `check_media` on the render: integrated LUFS, true peak, duration, fps,
+   and a speech-boundary re-check (chopped words at joins).
+   `check_loop` / `rushcut check-loop` for Shorts: SSIM of the last frames
+   vs frame 1, plus audio-level continuity across the wrap.
 
 ## Story formats & pacing
 

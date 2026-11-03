@@ -198,6 +198,11 @@ def _turns_from_words(
     return turns
 
 
+def coverage_ranges_from_cuts(cuts: Any) -> list[tuple[float, float]]:
+    """Kept [in, out) ranges on the source timeline, from any cut-list shape."""
+    return _coverage_from_cuts(cuts)
+
+
 def _coverage_from_cuts(cuts: Any) -> list[tuple[float, float]]:
     points = cut_points_from_cuts(cuts)
     by_index: dict[int, dict[str, float]] = {}

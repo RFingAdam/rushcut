@@ -27,15 +27,20 @@ File-level tools (no timeline required):
 
 | Tool | Role |
 |---|---|
-| `probe_media` | duration, size, fps, audio |
-| `cut_media` | trim to a time range |
+| `probe_media` | duration, size, fps, audio; flags unfinalized containers |
+| `stitch_session` | group recordings by gap, remux unfinalized MKVs, concat, offset map |
+| `session_lookup` | map session time onto a source file |
+| `detect_region_presence` | per-second overlay/face presence in a box |
+| `cut_media` | trim to a time range (also accepts session time) |
 | `concat_media` | join files in order |
 | `reframe_media` | cover-crop to width × height (optional pan/zoom) |
 | `mix_audio` | mix audio streams |
 | `normalize_audio` | ffmpeg `loudnorm` |
 | `generate_captions` / `burn_captions` | SRT + ASS, optional burn-in |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize) |
-| `check_output` / `rushcut check` | speech-boundary, required features, source preference |
+| `check_output` / `rushcut check` | speech-boundary, must_include, required features, source preference |
+| `check_loop` / `rushcut check-loop` | SSIM last vs first, audio wrap |
+| `check_media` / `rushcut check-media` | LUFS, true peak, duration, fps, chopped words on the render |
 
 ## Example (headless cut)
 

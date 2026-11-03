@@ -408,12 +408,31 @@ def analyze_transcript(
     end_seconds: float | None = None,
     diarize: bool | str = False,
     text: str | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
+    session_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Transcription/analysis primitive: word timestamps + optional speakers.
 
     Supply `words` to skip Whisper (tests and cached transcripts). Otherwise
     `path` is transcribed with faster-whisper (soft-fail if missing).
+    Session time (from ``stitch_session``) maps onto the source file.
     """
+    if offset_map is not None and (session_seconds is not None or session_start is not None):
+        from .session import lookup_session_time
+
+        t0 = session_start if session_start is not None else session_seconds
+        hit = lookup_session_time(offset_map, float(t0))
+        if not hit.get("ok"):
+            return hit
+        path = str(hit["path"])
+        start_seconds = float(hit["file_seconds"])
+        t1 = session_end if session_end is not None else None
+        if t1 is not None:
+            end_hit = lookup_session_time(offset_map, float(t1))
+            if end_hit.get("ok") and end_hit.get("path") == path:
+                end_seconds = float(end_hit["file_seconds"])
     source: dict[str, Any]
     if words is not None:
         source = {

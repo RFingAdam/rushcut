@@ -37,10 +37,10 @@ writes run inside an `UndoBlock` on the UI thread; `project.new` /
 | Render | `render.status` | ✅ job_id / state / percent (progress events, no UI-marshal wait) |
 | Project | `project.set_video` | ✅ width / height / frame_rate |
 | Host start | Application Extension / Script Menu / `ensure_host` | ✅ live TCP, `/RUNSCRIPT`, or `/CMDMODULE` path; tools set `used_mode` |
-| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `generate_captions`, `burn_captions` | ✅ (`transcribe_media` returns word timestamps; optional `diarize`, slice `start_seconds`/`end_seconds`) |
-| Quality (no NLE) | `check_output`, `validate_profile` | ✅ (`rushcut check` CLI; speech boundaries, required_features, source_preference) |
-| Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP-side only; no host RPC) |
-| File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` | ✅ |
+| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `generate_captions`, `burn_captions`, `stitch_session`, `session_lookup`, `detect_region_presence` | ✅ (`transcribe_media` returns word timestamps; optional `diarize`, slice `start_seconds`/`end_seconds`; session time via `offset_map`) |
+| Quality (no NLE) | `check_output`, `validate_profile`, `check_loop`, `check_media` | ✅ (`rushcut check` CLI; speech boundaries, must_include, loop seam, LUFS, required_features, source_preference) |
+| Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP + CLI; no host RPC) |
+| File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` | ✅ (`cut_media` accepts session time) |
 | Edit helpers | `apply_crossfade`, `apply_ducking` | ✅ |
 | Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` | ✅ (preset matching walks the full template list; MAGIX AVC/AAC aliases) |
 
