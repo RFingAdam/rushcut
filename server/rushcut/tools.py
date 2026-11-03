@@ -515,6 +515,7 @@ def render_with_preset(
     edit_meta: dict[str, Any] | None = None,
     wait: bool = True,
     timeout_seconds: float = 1800,
+    master: bool | None = None,
 ) -> dict:
     """Named preset → async render → poll → ffprobe verify → sidecar JSON."""
     from .render.presets import RENDER_PRESETS, match_preset
@@ -562,6 +563,24 @@ def render_with_preset(
             expect_duration=length_seconds,
         )
         sidecar = write_sidecar(output_path, edit_meta, extra={"preset": preset, "verify": verify})
+    mastered = None
+    want_master = master if master is not None else bool((spec or {}).get("master"))
+    if wait and want_master and os.path.isfile(output_path):
+        from .analysis.loudness import master_audio
+
+        mastered = master_audio(output_path, output_path)
+        if mastered.get("ok") and sidecar and sidecar.get("sidecar_path"):
+            extra = dict((sidecar.get("extra") or {}))
+            extra["master"] = mastered
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+        if verify is not None:
+            verify = verify_output(
+                output_path,
+                expect_width=spec["width"] if spec else None,
+                expect_height=spec["height"] if spec else None,
+                expect_audio=True,
+                expect_duration=length_seconds,
+            )
     quality = None
     profile_spec = (edit_meta or {}).get("profile")
     if wait and profile_spec:
@@ -595,6 +614,7 @@ def render_with_preset(
         "verify": verify,
         "sidecar": sidecar,
         "quality": quality,
+        "master": mastered,
         "output_path": output_path,
     }
 

@@ -5,8 +5,11 @@ host that runs **inside** VEGAS over TCP `127.0.0.1:8752`.
 
 Host tools need VEGAS. `probe_media`, `detect_scenes`, `analyze_audio`,
 `transcribe_media`, `generate_captions`, `cut_media`, `concat_media`,
-`reframe_media`, and `verify_output` are ffmpeg/Python and work with VEGAS
-closed. Headless editing with no VEGAS: [FFMPEG.md](FFMPEG.md).
+`reframe_media`, `master_audio`, `audio_cleanup`, and `verify_output`
+are ffmpeg/Python and work with VEGAS closed. Headless editing with no
+VEGAS: [FFMPEG.md](FFMPEG.md). Optional extras:
+`pip install 'rushcut-mcp[analysis]'` (numpy, encode-aware TP and STFT
+cleanup) and `pip install 'rushcut-mcp[denoise]'` (DeepFilterNet).
 
 ## 1. Script host
 

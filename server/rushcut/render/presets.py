@@ -21,6 +21,7 @@ RENDER_PRESETS: dict[str, dict[str, Any]] = {
             "9x16",
             "portrait",
         ],
+        "master": False,
     },
     "1080p": {
         "name": "1080p",
@@ -30,6 +31,7 @@ RENDER_PRESETS: dict[str, dict[str, Any]] = {
         "renderer_contains": "MP4",
         "template_contains": "",
         "prefer_template_substrings": ["1920x1080", "1080", "1920"],
+        "master": False,
     },
     "4k": {
         "name": "4k",
@@ -39,6 +41,7 @@ RENDER_PRESETS: dict[str, dict[str, Any]] = {
         "renderer_contains": "MP4",
         "template_contains": "",
         "prefer_template_substrings": ["2160", "3840", "4k", "4K", "UHD"],
+        "master": False,
     },
 }
 

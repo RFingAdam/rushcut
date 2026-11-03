@@ -90,6 +90,7 @@ def transcribe_media(
     language: str | None = "en",
     start_seconds: float | None = None,
     end_seconds: float | None = None,
+    initial_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Transcribe with faster-whisper if installed; otherwise soft-fail.
 
@@ -98,6 +99,7 @@ def transcribe_media(
 
     start_seconds / end_seconds transcribe a slice and return source-absolute
     word times (see #27). Word timestamps are always requested.
+    ``initial_prompt`` is forwarded for vocabulary (names, jargon).
     """
     if not path:
         return {"ok": False, "error": "path is required"}
@@ -126,6 +128,9 @@ def transcribe_media(
             return {"ok": False, "error": f"slice extract failed: {exc}", "available": True}
 
     device, compute = _pick_device()
+    extra: dict[str, Any] = {}
+    if initial_prompt:
+        extra["initial_prompt"] = initial_prompt
     try:
         try:
             model = WhisperModel(model_size, device=device, compute_type=compute)
@@ -134,6 +139,7 @@ def transcribe_media(
                 language=language,
                 vad_filter=True,
                 word_timestamps=True,
+                **extra,
             )
         except Exception as exc:
             # Typical: CUDA requested but no driver — retry CPU.
@@ -145,6 +151,7 @@ def transcribe_media(
                         language=language,
                         vad_filter=True,
                         word_timestamps=True,
+                        **extra,
                     )
                     device, compute = "cpu", "int8"
                 except Exception as exc2:

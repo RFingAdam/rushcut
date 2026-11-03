@@ -357,6 +357,7 @@ def transcribe_media(
     session_start: float | None = None,
     session_end: float | None = None,
     session_seconds: float | None = None,
+    initial_prompt: str | None = None,
 ) -> dict:
     """Word-timestamp transcript, optional speaker diarization. Soft-fails if Whisper is missing.
 
@@ -364,6 +365,7 @@ def transcribe_media(
     'stereo' (L/R channels), or 'pyannote' if that extra is installed. Turns may be
     supplied directly. Slice with start_seconds/end_seconds; times stay source-absolute.
     offset_map + session_start/session_end accept stitch_session time.
+    `initial_prompt` is forwarded to Whisper for vocabulary.
     """
     from .analysis.transcript import analyze_transcript as _analyze
 
@@ -380,6 +382,7 @@ def transcribe_media(
         session_start=session_start,
         session_end=session_end,
         session_seconds=session_seconds,
+        initial_prompt=initial_prompt,
     )
 
 
@@ -391,11 +394,52 @@ def generate_captions(
     output_dir: str | None = None,
     style: str = "default",
     group_words: bool = True,
+    max_chars: int | None = None,
+    max_words: int = 4,
+    max_gap: float = 0.5,
+    extend_seconds: float = 0.35,
+    split_on_punctuation: bool = True,
+    mask_words: list[str] | None = None,
+    uppercase: bool | None = None,
+    outline: int | None = None,
+    shadow: int | None = None,
+    margin_v: int | None = None,
+    fix_map: dict[str, str] | None = None,
+    keep_windows: list[dict[str, Any]] | None = None,
+    active_word: bool = False,
+    initial_prompt: str | None = None,
 ) -> dict:
-    """Write SRT + ASS. style is 'default' (16:9) or 'vertical' (9:16). No NLE."""
+    """Write SRT + ASS. style is 'default' (16:9) or 'vertical' (9:16). No NLE.
+
+    Chunks word timestamps by max_chars / max_words / max_gap / punctuation,
+    then extends each cue ~0.35 s without overlapping the next. fix_map and
+    keep_windows run before chunking. mask_words returns masked_spans for
+    bleeps. active_word writes a karaoke-style ASS preset.
+    """
     from .analysis.captions import generate_captions as _caps
 
-    return _caps(path, segments, words, output_dir, style, group_words)
+    return _caps(
+        path,
+        segments,
+        words,
+        output_dir,
+        style,
+        group_words,
+        max_chars=max_chars,
+        max_words=max_words,
+        max_gap=max_gap,
+        extend_seconds=extend_seconds,
+        split_on_punctuation=split_on_punctuation,
+        mask_words=mask_words,
+        uppercase=uppercase,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+        fix_map=fix_map,
+        keep_windows=keep_windows,
+        active_word=active_word,
+        initial_prompt=initial_prompt,
+    )
 
 
 @mcp.tool()
@@ -477,6 +521,182 @@ def normalize_audio(
     from .analysis.edit_ops import normalize_audio as _norm
 
     return _norm(path, output_path, integrated_lufs)
+
+
+@mcp.tool()
+def add_music_bed(
+    path: str,
+    onto: str | None = None,
+    output_path: str | None = None,
+    gain: float = 1.0,
+    duck_under: str | None = None,
+    duck_db: float = -12.0,
+    threshold: float = 0.02,
+    ratio: float = 8.0,
+    attack: float = 20.0,
+    release: float = 200.0,
+    fade_in: float = 0.5,
+    fade_out: float = 0.5,
+) -> dict:
+    """Mix a music bed under a program with sidechain ducking and fades. No NLE."""
+    from .analysis.audio_ops import add_music_bed as _bed
+
+    return _bed(
+        path,
+        onto=onto,
+        output_path=output_path,
+        gain=gain,
+        duck_under=duck_under,
+        duck_db=duck_db,
+        threshold=threshold,
+        ratio=ratio,
+        attack=attack,
+        release=release,
+        fade_in=fade_in,
+        fade_out=fade_out,
+    )
+
+
+@mcp.tool()
+def bleep_spans(
+    path: str,
+    spans: list[dict[str, Any]],
+    output_path: str | None = None,
+    mode: str = "tone",
+    freq: float = 1000.0,
+) -> dict:
+    """Replace time spans with a tone, silence, or reversed audio. Accepts masked_spans. No NLE."""
+    from .analysis.audio_ops import bleep_spans as _bleep
+
+    return _bleep(path, spans, output_path=output_path, mode=mode, freq=freq)
+
+
+@mcp.tool()
+def insert_audio(
+    path: str,
+    clip: str,
+    at: float,
+    output_path: str | None = None,
+    duck_db: float = -6.0,
+    ramp_ms: float = 200.0,
+    ramp_shape: str = "raised_cosine",
+) -> dict:
+    """Insert a voice line into a mix and duck the bed with smooth ramps. No NLE."""
+    from .analysis.audio_ops import insert_audio as _ins
+
+    return _ins(path, clip, at, output_path=output_path, duck_db=duck_db, ramp_ms=ramp_ms, ramp_shape=ramp_shape)
+
+
+@mcp.tool()
+def replace_audio_span(
+    path: str,
+    old_clip: str,
+    new_clip: str | None = None,
+    output_path: str | None = None,
+    at: float | None = None,
+    search_samples: int = 64,
+) -> dict:
+    """Find a previously inserted line (± a few samples) and swap it. No NLE."""
+    from .analysis.audio_ops import replace_audio_span as _rep
+
+    return _rep(path, old_clip, new_clip=new_clip, output_path=output_path, at=at, search_samples=search_samples)
+
+
+@mcp.tool()
+def loop_fades(
+    path: str,
+    in_s: float = 0.2,
+    out_s: float = 0.2,
+    output_path: str | None = None,
+) -> dict:
+    """Matching fades at both ends (silence + black) so a loop wraps. No NLE."""
+    from .analysis.audio_ops import loop_fades as _loop
+
+    return _loop(path, in_s=in_s, out_s=out_s, output_path=output_path)
+
+
+@mcp.tool()
+def apply_timeline(
+    effect: str,
+    path: str | None = None,
+    output_path: str | None = None,
+    track_index: int | None = None,
+    replace_media: bool = True,
+    params: dict[str, Any] | None = None,
+) -> dict:
+    """Run music_bed / bleep / insert_audio / replace_audio / loop_fades / master / cleanup on a file or the open timeline."""
+    from .edit.timeline import apply_timeline as _apply
+
+    return _apply(
+        effect,
+        path=path,
+        output_path=output_path,
+        track_index=track_index,
+        replace_media=replace_media,
+        **(params or {}),
+    )
+
+
+@mcp.tool()
+def master_audio(
+    path: str,
+    output_path: str | None = None,
+    target_i: float = -14.0,
+    target_tp: float = -1.5,
+    target_lra: float = 11.0,
+    encode_aware: bool = True,
+) -> dict:
+    """Two-pass loudnorm, limiter, encode-aware true peak. Video is copied. No NLE."""
+    from .analysis.loudness import master_audio as _master
+
+    return _master(
+        path,
+        output_path=output_path,
+        target_i=target_i,
+        target_tp=target_tp,
+        target_lra=target_lra,
+        encode_aware=encode_aware,
+    )
+
+
+@mcp.tool()
+def analyze_noise_floor(
+    path: str,
+    window_seconds: float = 1.0,
+    prominence_db: float = 12.0,
+) -> dict:
+    """Per-window band floor dB and detected tonal lines (mid vs side). No NLE."""
+    from .analysis.cleanup import analyze_noise_floor as _floor
+
+    return _floor(path, window_seconds=window_seconds, prominence_db=prominence_db)
+
+
+@mcp.tool()
+def audio_cleanup(
+    path: str,
+    output_path: str | None = None,
+    notches: list[dict[str, Any]] | None = None,
+    hp_hz: float = 80.0,
+    adaptive_tonal: bool = True,
+    ms_mode: bool = False,
+    max_reduction_db: float = 24.0,
+    comparison_clip: bool = False,
+    voice_separate: bool = False,
+) -> dict:
+    """Notch, high-pass, optional adaptive tonal-line and mid/side drone reduction. No NLE."""
+    from .analysis.cleanup import audio_cleanup as _clean
+
+    return _clean(
+        path,
+        output_path=output_path,
+        notches=notches,
+        hp_hz=hp_hz,
+        adaptive_tonal=adaptive_tonal,
+        ms_mode=ms_mode,
+        max_reduction_db=max_reduction_db,
+        comparison_clip=comparison_clip,
+        voice_separate=voice_separate,
+    )
 
 
 @mcp.tool()
@@ -730,8 +950,13 @@ def render_with_preset(
     length_seconds: float | None = None,
     edit_meta: dict[str, Any] | None = None,
     wait: bool = True,
+    master: bool | None = None,
 ) -> dict:
-    """Named preset (vertical / 1080p / 4k): async render, ffprobe verify, sidecar JSON."""
+    """Named preset (vertical / 1080p / 4k): async render, ffprobe verify, sidecar JSON.
+
+    Pass master=true (or set master: true on the preset) to run two-pass
+    master_audio on the rendered file.
+    """
     return tools.render_with_preset(
         output_path,
         preset,
@@ -739,6 +964,7 @@ def render_with_preset(
         length_seconds=length_seconds,
         edit_meta=edit_meta,
         wait=wait,
+        master=master,
     )
 
 

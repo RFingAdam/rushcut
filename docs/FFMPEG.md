@@ -35,9 +35,13 @@ File-level tools (no timeline required):
 | `concat_media` | join files in order |
 | `reframe_media` | cover-crop to width × height (optional pan/zoom) |
 | `mix_audio` | mix audio streams |
-| `normalize_audio` | ffmpeg `loudnorm` |
-| `generate_captions` / `burn_captions` | SRT + ASS, optional burn-in |
-| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize) |
+| `normalize_audio` | single-pass ffmpeg `loudnorm` |
+| `master_audio` | two-pass loudnorm, limiter, encode-aware true peak; copies video |
+| `add_music_bed` / `bleep_spans` / `insert_audio` / `replace_audio_span` / `loop_fades` | file-level mix / censor / VO / loop fades |
+| `apply_timeline` | same ops as a named timeline effect |
+| `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
+| `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke), optional burn-in |
+| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize; `initial_prompt`) |
 | `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference, Shorts duration/loop |
 | `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |
 | `check_speed_ramps` | flag speed ≠ 1 steps that cover a word |
@@ -69,3 +73,53 @@ Transport (`play` / `stop` / `seek`) is unsupported — there is no GUI.
 Render templates advertised by this backend are ffmpeg size presets
 (`Vertical 1080x1920`, `Internet HD 1080p`, `4K UHD`) so
 `render_with_preset` works the same way as on VEGAS and Resolve.
+
+Pass `master=true` (or set `master: true` on a preset) to run
+`master_audio` on the rendered file. Defaults are -14 LUFS integrated,
+-1.5 dBTP, LRA 11. The two-pass loudnorm + limiter path is pure ffmpeg.
+The encode-aware true-peak loop (AAC 192k → decode → 4×-oversampled TP,
+local gain reduction) uses numpy when you install
+`pip install 'rushcut-mcp[analysis]'` and ffmpeg windowed limiting
+otherwise. Video is copied (`-c:v copy`); only audio is rewritten.
+
+## Caption style presets
+
+`generate_captions(..., style=...)` writes SRT + ASS. Word timestamps
+are grouped by `max_chars` / `max_words` / `max_gap` (split on gaps
+greater than 0.5 s) and trailing punctuation; each cue is extended
+~0.35 s but never into the next. `fix_map` and `keep_windows` run
+before chunking. `mask_words` returns `masked_spans: [{start,end,word}]`
+for `bleep_spans`. `active_word=true` writes a karaoke-style `\\k` ASS
+preset (yellow active word). `initial_prompt` is forwarded to Whisper
+when the tool transcribes `path`.
+
+### 16:9 (`style="default"`)
+
+- PlayRes 1920×1080, Arial 48
+- White fill, black outline 4, shadow 2
+- MarginV 40
+- Default chunking: 42 characters, 4 words
+
+### 9:16 (`style="vertical"`)
+
+- PlayRes 1080×1920, Arial 64
+- White fill, black outline 6, shadow 2
+- MarginV 160
+- Default chunking: 18 characters, 4 words, uppercase
+
+## Loop fades
+
+`loop_fades(path, in_s=0.2, out_s=0.2)` applies matching fades at both
+ends so the last frame flows into the first: the first 0.2 s fades up
+from silence and black, the last 0.2 s fades down to silence and black.
+Use it on Shorts that should wrap.
+
+## Hum cleanup
+
+`analyze_noise_floor` returns per-window band floors (dB) and tonal
+lines (frequency, prominence, mid vs side). `audio_cleanup` takes a
+`notches` list, `hp_hz`, `adaptive_tonal`, `ms_mode`, and
+`max_reduction_db`. STFT is streamed in chunks so a 3-hour file does
+not keep every frame in RAM. Optional DeepFilterNet voice separation
+is `pip install 'rushcut-mcp[denoise]'`. Set `comparison_clip=true`
+for a 60 s before/after wav.

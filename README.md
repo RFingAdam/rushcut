@@ -16,7 +16,7 @@
 
 Rushcut MCP is a [Model Context Protocol](https://modelcontextprotocol.io)
 server (Python, [FastMCP](https://github.com/jlowin/fastmcp)) that exposes
-**76 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
+**90 video-editing tools** to any MCP client: Claude Code, Claude Desktop,
 Cursor, or anything else that speaks stdio MCP. The same tool names
 (`add_track`, `place_media`, `trim_event`, `set_event_fades`,
 `render_with_preset`, ...) drive whichever backend you select with
@@ -84,6 +84,8 @@ cd rushcut/server
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .                   # add ".[whisper]" for local transcription
+                                   # ".[analysis]" for numpy STFT / encode-aware TP
+                                   # ".[denoise]" for optional DeepFilterNet
 ```
 
 Smoke-test it without an MCP client:
@@ -160,7 +162,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-81 tools, generated from the server's registered tool list. Tool names are
+90 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -171,15 +173,15 @@ reason instead of raising.
 | Media pool (4) | `import_media`, `list_media`, `replace_media`, `set_media_alpha` |
 | Tracks (5) | `add_track`, `set_track_props`, `set_track_composite_level`, `clear_track_events`, `clear_envelope` |
 | Clips / events (11) | `place_media`, `add_video_event`, `add_audio_event`, `add_title`, `trim_event`, `move_event`, `delete_event`, `set_event_fades`, `set_event_opacity`, `set_event_gain`, `set_motion_keyframes` |
-| Mixing and transitions (3) | `set_envelope_points`, `apply_crossfade`, `apply_ducking` |
+| Mixing and transitions (4) | `set_envelope_points`, `apply_crossfade`, `apply_ducking`, `apply_timeline` |
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (8) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack` |
-| Analysis, no NLE needed (7) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
+| Analysis, no NLE needed (8) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
 | Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
-| File-level FFmpeg ops, no NLE needed (5) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` |
+| File-level FFmpeg ops, no NLE needed (12) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`, `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`, `master_audio`, `audio_cleanup` |
 | Resolve Studio extras (3) | `resolve_create_subtitles`, `resolve_smart_reframe`, `resolve_set_voice_isolation` |
 | Deprecated stubs (3) | `find_highlights`, `apply_vertical_short`, `propose_edit` (return a migration error; see [docs/MIGRATION.md](docs/MIGRATION.md)) |
 
@@ -361,7 +363,9 @@ print(result)  # render result, ffprobe verification, .qa.json and .edit.json si
 
 The agent can also skip the timeline and work on files directly:
 `cut_media`, `concat_media`, `reframe_media` (cover-crop to any size),
-`mix_audio`, `normalize_audio` (EBU R128 `loudnorm`), then
+`mix_audio`, `normalize_audio` (EBU R128 `loudnorm`), `master_audio`
+(two-pass loudnorm + limiter; pass `master=true` on `render_with_preset`),
+`add_music_bed` / `bleep_spans` / `insert_audio` / `loop_fades`, then
 `generate_captions` + `burn_captions`. See [docs/FFMPEG.md](docs/FFMPEG.md).
 
 ## Story formats & pacing
@@ -442,7 +446,7 @@ flowchart LR
     client["MCP client<br/>Claude Code / Desktop / Cursor"] -- "stdio (MCP)" --> server
 
     subgraph server["Rushcut MCP server (Python, FastMCP)"]
-        tools["76 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
+        tools["90 MCP tools<br/>rushcut/__init__.py"] --> facade["tools.py"]
         facade --> select{"DIRECTOR_EDITOR"}
         tools --> analysis["analysis/ + render/ + quality/<br/>probe, transcript, captions,<br/>speech boundaries, verify"]
     end

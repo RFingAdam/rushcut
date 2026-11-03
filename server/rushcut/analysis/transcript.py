@@ -412,6 +412,7 @@ def analyze_transcript(
     session_start: float | None = None,
     session_end: float | None = None,
     session_seconds: float | None = None,
+    initial_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Transcription/analysis primitive: word timestamps + optional speakers.
 
@@ -459,6 +460,7 @@ def analyze_transcript(
             language=language,
             start_seconds=start_seconds,
             end_seconds=end_seconds,
+            initial_prompt=initial_prompt,
         )
         if not source.get("ok"):
             return source
