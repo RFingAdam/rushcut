@@ -20,7 +20,7 @@ def _studio(app=None) -> ResolveBackend:
 
 
 def test_ping_and_state_on_studio_mock():
-    backend = _studio()
+    _studio()
     ping = tools.ping()
     assert ping["ok"] is True
     assert ping["editor"] == "resolve"
@@ -67,7 +67,7 @@ def test_free_edition_is_refused():
 
 
 def test_place_trim_move_delete_and_motion():
-    backend = _studio()
+    _studio()
     tools.add_track("video", "Short V1")
     placed = tools.add_video_event(0, r"D:\media\clip.mp4", 0.0, 8.0)
     assert placed["ok"] is True
