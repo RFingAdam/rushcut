@@ -413,6 +413,16 @@ def analyze_transcript(
     session_end: float | None = None,
     session_seconds: float | None = None,
     initial_prompt: str | None = None,
+    cache_dir: str | None = None,
+    no_cache: bool = False,
+    json_path: str | None = None,
+    run_dir: str | None = None,
+    chunk_seconds: float | None = None,
+    overlap_seconds: float | None = None,
+    drift_threshold_s: float | None = None,
+    tracks: dict[str, Any] | None = None,
+    profile: Any = None,
+    lexicon: list[str] | None = None,
 ) -> dict[str, Any]:
     """Transcription/analysis primitive: word timestamps + optional speakers.
 
@@ -454,18 +464,54 @@ def analyze_transcript(
     else:
         if not path:
             return {"ok": False, "error": "path or words is required"}
-        source = transcribe_media(
-            path,
-            model_size=model_size,
-            language=language,
-            start_seconds=start_seconds,
-            end_seconds=end_seconds,
-            initial_prompt=initial_prompt,
-        )
+        kwargs: dict[str, Any] = {
+            "model_size": model_size,
+            "language": language,
+            "start_seconds": start_seconds,
+            "end_seconds": end_seconds,
+            "initial_prompt": initial_prompt,
+            "cache_dir": cache_dir,
+            "no_cache": no_cache,
+            "json_path": json_path,
+            "run_dir": run_dir,
+            "lexicon": lexicon,
+        }
+        if chunk_seconds is not None:
+            kwargs["chunk_seconds"] = chunk_seconds
+        if overlap_seconds is not None:
+            kwargs["overlap_seconds"] = overlap_seconds
+        if drift_threshold_s is not None:
+            kwargs["drift_threshold_s"] = drift_threshold_s
+        if profile is not None:
+            transcript_cfg = getattr(profile, "transcript", None)
+            lexicon_cfg = getattr(profile, "lexicon", None)
+            if transcript_cfg is not None and chunk_seconds is None:
+                kwargs["chunk_seconds"] = float(getattr(transcript_cfg, "chunk_seconds", 600))
+            if transcript_cfg is not None and model_size == "base":
+                model = getattr(transcript_cfg, "model", None)
+                if model:
+                    kwargs["model_size"] = model
+            if lexicon_cfg is not None and not initial_prompt:
+                kwargs["initial_prompt"] = getattr(lexicon_cfg, "initial_prompt", None)
+                if not lexicon:
+                    kwargs["lexicon"] = list(getattr(lexicon_cfg, "hotwords", None) or [])
+        source = transcribe_media(path, **kwargs)
         if not source.get("ok"):
             return source
 
     word_list = list(source.get("words") or [])
+    if path and (tracks or (profile is not None and getattr(getattr(profile, "audio", None), "tracks", None))):
+        from .speakers import attribute_speakers
+
+        attributed = attribute_speakers(path, tracks=tracks, words=word_list, profile=profile)
+        if attributed.get("ok") and attributed.get("words"):
+            word_list = list(attributed["words"])
+            source["attribution"] = {
+                "delay_seconds": attributed.get("delay_seconds"),
+                "gain": attributed.get("gain"),
+                "spans": attributed.get("spans") or [],
+                "note": attributed.get("note"),
+            }
     diar = diarize_media(path, words=word_list, turns=turns, method=diarize)
     if diar.get("words"):
         word_list = list(diar["words"])

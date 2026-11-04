@@ -35,7 +35,8 @@ Pure Python + ffmpeg (no VEGAS):
 - `probe_media` (ffprobe)
 - `detect_scenes` (ffmpeg scene score)
 - `analyze_audio` — windowed RMS/peak spikes
-- `transcribe_media` / `analyze_transcript` — optional `faster-whisper`; word timestamps; optional speaker diarization (injected turns, stereo L/R, pyannote if installed); slice mode with source-absolute times
+- `transcribe_media` / `analyze_transcript` — optional `faster-whisper`; word timestamps; 10 min chunks with overlap, drift check, and cache; optional speaker diarization (injected turns, stereo L/R, pyannote if installed); `attribute_speakers` for mic vs mix (#28); slice mode with source-absolute times
+- `probe_media` / `repair_media` — unfinalized MKV flags (`header_duration_missing`, `cues_missing`, estimated duration) and stream-copy remux (#29)
 - `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `must_include`, `required_features`, `source_preference` (local recording over platform VOD), `check_seams` / `snap_cuts`, speed-ramp speech guard
 - `rushcut check --parity` / `check_parity` — layout SSIM/MAD vs an approved cut (#51)
 - `stitch_session` / `detect_region_presence` / `check_loop` / `check_media`

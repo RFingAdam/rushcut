@@ -30,6 +30,10 @@ public partial class EntryPoint
     private string renderOutput = "";
     private string renderError = "";
     private bool renderHooksAttached = false;
+    private bool createdByRushcut = false;
+    private bool hostDirty = false;
+    private int hostEditCount = 0;
+    private string currentProjectId = "";
 
     // Called by the VegasDirector Application Extension at VEGAS startup (no dialog).
     public void StartHeadless(Vegas vegas, Control marshal)
@@ -382,7 +386,13 @@ public partial class EntryPoint
         {
             try
             {
-                return handler(req);
+                string mutated = handler(req);
+                if (mutated != null && mutated.IndexOf("\"ok\":true", StringComparison.Ordinal) >= 0)
+                {
+                    hostDirty = true;
+                    hostEditCount++;
+                }
+                return mutated;
             }
             catch (Exception)
             {
@@ -502,6 +512,16 @@ public partial class EntryPoint
         try { vw = project.Video.Width; vh = project.Video.Height; fps = project.Video.FrameRate; } catch { }
 
         StringBuilder sb = new StringBuilder();
+        int eventCount = 0;
+        try
+        {
+            for (int i = 0; i < project.Tracks.Count; i++)
+                eventCount += project.Tracks[i].Events.Count;
+        }
+        catch { }
+        string filePath = "";
+        try { filePath = project.FilePath ?? ""; } catch { }
+        bool untitled = filePath == null || filePath.Length == 0;
         sb.Append("{\"ok\":true")
           .Append(",\"length_seconds\":").Append(Json.Num(TimecodeToSeconds(project.Length)))
           .Append(",\"video_width\":").Append(vw)
@@ -509,8 +529,16 @@ public partial class EntryPoint
           .Append(",\"frame_rate\":").Append(Json.Num(fps))
           .Append(",\"video_track_count\":").Append(videoTracks)
           .Append(",\"audio_track_count\":").Append(audioTracks)
+          .Append(",\"track_count\":").Append(project.Tracks.Count)
+          .Append(",\"event_count\":").Append(eventCount)
           .Append(",\"tracks\":").Append(tracks)
           .Append(",\"events\":").Append(events)
+          .Append(",\"dirty\":").Append(hostDirty ? "true" : "false")
+          .Append(",\"host_edit_count\":").Append(hostEditCount)
+          .Append(",\"created_by_rushcut\":").Append(createdByRushcut ? "true" : "false")
+          .Append(",\"project_id\":").Append(Json.Str(currentProjectId))
+          .Append(",\"untitled\":").Append(untitled ? "true" : "false")
+          .Append(",\"project_path\":").Append(Json.Str(filePath))
           .Append("}");
         return RpcResponse.Result(req.Id, sb.ToString());
     }
@@ -1565,18 +1593,57 @@ public partial class EntryPoint
     // ===== Phase 3 (2026-10-22): project lifecycle, media pool, track props, envelope clear, event gain, render templates =====
     private static readonly string[] LongMethods = { "project.save", "project.new", "project.open", "render.start" };
 
+    private void CountProjectContent(out int trackCount, out int eventCount, out bool untitled, out string filePath)
+    {
+        trackCount = 0;
+        eventCount = 0;
+        untitled = true;
+        filePath = "";
+        try
+        {
+            Project project = myVegas.Project;
+            if (project == null) return;
+            trackCount = project.Tracks.Count;
+            for (int i = 0; i < project.Tracks.Count; i++)
+                eventCount += project.Tracks[i].Events.Count;
+            try { filePath = project.FilePath ?? ""; } catch { filePath = ""; }
+            untitled = filePath == null || filePath.Length == 0;
+        }
+        catch { }
+    }
+
     private bool SaveOrDiscard(RpcRequest req, out string fail)
     {
         fail = null;
         string saveTo = Json.GetString(req.ParamsJson, "save_current_to");
         bool discard = Json.GetBool(req.ParamsJson, "discard_unsaved", false);
+        string requestedId = Json.GetString(req.ParamsJson, "project_id");
+        int trackCount, eventCount;
+        bool untitled;
+        string filePath;
+        CountProjectContent(out trackCount, out eventCount, out untitled, out filePath);
+        bool hasContent = eventCount > 0 || hostDirty;
+        string kind = untitled ? "Untitled project" : "Project";
+        string counts = "tracks=" + trackCount + ", events=" + eventCount;
         if (saveTo != null && saveTo.Length > 0)
         {
             if (!myVegas.SaveProject(saveTo)) { fail = "Saving the current project failed: " + saveTo; return false; }
             return true;
         }
-        if (!discard) { fail = "Pass save_current_to (path) to save the open project first, or discard_unsaved=true."; return false; }
-        return true;
+        if (!discard)
+        {
+            if (hasContent)
+                fail = kind + " has content (" + counts + "). Pass save_current_to, or discard_unsaved=true with project_id.";
+            else
+                fail = "Pass save_current_to (path) to save the open project first, or discard_unsaved=true.";
+            return false;
+        }
+        if (!hasContent) return true;
+        if (createdByRushcut) return true;
+        if (requestedId != null && requestedId.Length > 0 && requestedId == currentProjectId) return true;
+        string pid = (currentProjectId != null && currentProjectId.Length > 0) ? " project_id=" + currentProjectId : " project_id";
+        fail = kind + " has content (" + counts + "). It was not created by rushcut in this session. Pass discard_unsaved=true with" + pid + ", or save_current_to.";
+        return false;
     }
 
     // Not undo-wrapped: NewProject closes the current project.
@@ -1585,7 +1652,16 @@ public partial class EntryPoint
         string fail;
         if (!SaveOrDiscard(req, out fail)) return SoftFail(req.Id, fail);
         bool ok = myVegas.NewProject(false, false);
-        return RpcResponse.Result(req.Id, "{\"ok\":" + (ok ? "true" : "false") + "}");
+        if (ok)
+        {
+            createdByRushcut = true;
+            hostDirty = false;
+            hostEditCount = 0;
+            currentProjectId = Guid.NewGuid().ToString("N");
+        }
+        return RpcResponse.Result(req.Id, "{\"ok\":" + (ok ? "true" : "false") +
+            ",\"project_id\":" + Json.Str(currentProjectId) +
+            ",\"created_by_rushcut\":true}");
     }
 
     // Not undo-wrapped: NewProject + OpenProject close the current project.
@@ -1597,7 +1673,15 @@ public partial class EntryPoint
         if (!SaveOrDiscard(req, out fail)) return SoftFail(req.Id, fail);
         myVegas.NewProject(false, false);   // closes the current one without a save prompt (already saved/discarded above)
         bool ok = myVegas.OpenProject(path);
-        return RpcResponse.Result(req.Id, "{\"ok\":" + (ok ? "true" : "false") + ",\"path\":" + Json.Str(path) + "}");
+        if (ok)
+        {
+            createdByRushcut = false;
+            hostDirty = false;
+            hostEditCount = 0;
+            currentProjectId = path;
+        }
+        return RpcResponse.Result(req.Id, "{\"ok\":" + (ok ? "true" : "false") + ",\"path\":" + Json.Str(path) +
+            ",\"project_id\":" + Json.Str(currentProjectId) + "}");
     }
 
     private string ListMedia(RpcRequest req)

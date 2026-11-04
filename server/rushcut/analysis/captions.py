@@ -289,15 +289,20 @@ def chunk_words(
             item = dict(w)
             item["word"] = _display_text(_word_text(w), uppercase)
             chunk_words_out.append(item)
-        chunks.append(
-            {
-                "start_seconds": start,
-                "end_seconds": end,
-                "raw_end_seconds": raw_end,
-                "text": " ".join(t for t in texts if t).strip(),
-                "words": chunk_words_out,
-            }
+        speakers = [str(w.get("speaker")) for w in group if w.get("speaker")]
+        speaker = speakers[0] if speakers and all(s == speakers[0] for s in speakers) else (
+            speakers[0] if speakers else None
         )
+        chunk: dict[str, Any] = {
+            "start_seconds": start,
+            "end_seconds": end,
+            "raw_end_seconds": raw_end,
+            "text": " ".join(t for t in texts if t).strip(),
+            "words": chunk_words_out,
+        }
+        if speaker:
+            chunk["speaker"] = speaker
+        chunks.append(chunk)
     return chunks
 
 
@@ -393,8 +398,28 @@ def _cues_from_input(
         end = float(seg.get("end_seconds") or seg.get("end") or start + 1.5)
         if end <= start:
             end = start + 1.2
-        cues.append({"start_seconds": start, "end_seconds": end, "text": text, "words": []})
+        item = {"start_seconds": start, "end_seconds": end, "text": text, "words": []}
+        if seg.get("speaker"):
+            item["speaker"] = seg.get("speaker")
+        cues.append(item)
     return cues
+
+
+def _ass_style_line(
+    name: str,
+    font: str,
+    size: int,
+    primary: str,
+    secondary: str,
+    outline_c: str,
+    outline_w: int,
+    shadow_w: int,
+    margin: int,
+) -> str:
+    return (
+        f"Style: {name},{font},{size},{primary},{secondary},{outline_c},"
+        f"&H80000000,-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,60,60,{margin},1\n"
+    )
 
 
 def _ass_header(
@@ -404,6 +429,7 @@ def _ass_header(
     shadow: int | None = None,
     margin_v: int | None = None,
     active_word: bool = False,
+    speaker_styles: dict[str, str] | None = None,
 ) -> str:
     preset = _style_preset(style)
     play_x = int(preset["play_x"])
@@ -421,7 +447,7 @@ def _ass_header(
         primary = "&H0000FFFF"
         secondary = "&H00FFFFFF"
     outline_c = "&H00000000"
-    return (
+    header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
         f"PlayResX: {play_x}\n"
@@ -434,12 +460,30 @@ def _ass_header(
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font},{size},{primary},{secondary},{outline_c},"
-        f"&H80000000,-1,0,0,0,100,100,0,0,1,{outline_w},{shadow_w},2,60,60,{margin},1\n"
+        + _ass_style_line(
+            "Default", font, size, primary, secondary, outline_c, outline_w, shadow_w, margin
+        )
+        + _ass_style_line(
+            "Host", font, size, primary, secondary, outline_c, outline_w, shadow_w, margin
+        )
+        + _ass_style_line(
+            "Other", font, size, "&H00C0C0C0", secondary, outline_c, outline_w, shadow_w, margin
+        )
+    )
+    extras = speaker_styles or {}
+    for name, color in extras.items():
+        style_name = str(name).replace(",", "")
+        if style_name.casefold() in {"default", "host", "other"}:
+            continue
+        header += _ass_style_line(
+            style_name, font, size, str(color), secondary, outline_c, outline_w, shadow_w, margin
+        )
+    header += (
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
+    return header
 
 
 def _karaoke_text(cue: dict[str, Any]) -> str:
@@ -482,6 +526,8 @@ def generate_captions(
     keep_windows: list[dict[str, Any]] | list[tuple[float, float]] | None = None,
     active_word: bool = False,
     initial_prompt: str | None = None,
+    speakers: list[str] | None = None,
+    speaker_styles: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Write SRT + ASS next to the media (or output_dir). No NLE required.
 
@@ -504,6 +550,15 @@ def generate_captions(
         } else False
 
     working_words = list(words or [])
+    if speakers:
+        allow = {str(s).casefold() for s in speakers}
+        working_words = [
+            w for w in working_words if str(w.get("speaker") or "").casefold() in allow
+        ]
+        if segments:
+            segments = [
+                s for s in segments if str(s.get("speaker") or "").casefold() in allow
+            ]
     transcribed = None
     if not working_words and not segments and path:
         from .whisper import transcribe_media
@@ -567,6 +622,7 @@ def generate_captions(
             shadow=shadow,
             margin_v=margin_v,
             active_word=active_word,
+            speaker_styles=speaker_styles,
         )
     ]
     for cue in cues:
@@ -574,9 +630,24 @@ def generate_captions(
             text = _karaoke_text(cue)
         else:
             text = (cue["text"] or "").replace("\n", "\\N")
+        cue_style = "Default"
+        speaker = str(cue.get("speaker") or "").strip()
+        if speaker:
+            key = speaker.casefold()
+            if key == "host":
+                cue_style = "Host"
+            elif key == "other":
+                cue_style = "Other"
+            elif speaker_styles and speaker in speaker_styles:
+                cue_style = speaker.replace(",", "")
+            elif speaker_styles:
+                for name in speaker_styles:
+                    if str(name).casefold() == key:
+                        cue_style = str(name).replace(",", "")
+                        break
         ass.append(
             f"Dialogue: 0,{_ts_ass(cue['start_seconds'])},{_ts_ass(cue['end_seconds'])},"
-            f"Default,,0,0,0,,{text}\n"
+            f"{cue_style},,0,0,0,,{text}\n"
         )
     with open(ass_path, "w", encoding="utf-8") as fh:
         fh.writelines(ass)
@@ -607,6 +678,8 @@ def generate_captions(
             "split_on_punctuation": split_on_punctuation,
         },
     }
+    if speakers:
+        result["speakers"] = list(speakers)
     if initial_prompt:
         result["initial_prompt"] = initial_prompt
     if transcribed is not None:

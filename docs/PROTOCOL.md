@@ -64,8 +64,8 @@ Almost every VEGAS-side failure is a JSON-RPC **result** with
 | `project.get_state` | — | length, track counts, tracks, events |
 | `project.get_selected_events` | — | selected `track_index` / `event_index` |
 | `project.save` | `path?` | omit `path` to save in place |
-| `project.new` | `save_current_to?`, `discard_unsaved?` | one of the two required |
-| `project.open` | `path`, `save_current_to?`, `discard_unsaved?` | |
+| `project.new` | `save_current_to?`, `discard_unsaved?`, `project_id?` | one of save/discard required; content not created this session also needs `project_id` |
+| `project.open` | `path`, `save_current_to?`, `discard_unsaved?`, `project_id?` | same discard rules as `project.new` |
 | `track.add` | `type` (`video`\|`audio`), `name?`, `index?` | |
 | `track.set_composite_level` | `track_index`, `level` | |
 | `track.set_props` | `track_index`, `name?`, `mute?`, `solo?`, `volume?` | |

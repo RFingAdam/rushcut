@@ -9,9 +9,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from .model import (
+    AudioSettings,
+    AudioTrackRole,
     CheckMode,
     EditProfile,
     GateMode,
+    LexiconSettings,
     QualitySettings,
     SeamsSettings,
     ShortsSettings,
@@ -19,13 +22,17 @@ from .model import (
     SourcePreference,
     SpeechBoundarySettings,
     SpeedRampSettings,
+    TranscriptSettings,
     TurnCompletenessSettings,
 )
 
 __all__ = [
+    "AudioSettings",
+    "AudioTrackRole",
     "CheckMode",
     "EditProfile",
     "GateMode",
+    "LexiconSettings",
     "QualitySettings",
     "SeamsSettings",
     "ShortsSettings",
@@ -33,6 +40,7 @@ __all__ = [
     "SourcePreference",
     "SpeechBoundarySettings",
     "SpeedRampSettings",
+    "TranscriptSettings",
     "TurnCompletenessSettings",
     "load_profile",
     "profile_from_data",

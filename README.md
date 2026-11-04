@@ -177,7 +177,7 @@ reason instead of raising.
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (8) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack` |
-| Analysis, no NLE needed (8) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence` |
+| Analysis, no NLE needed (11) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers` |
 | Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
@@ -208,6 +208,7 @@ rushcut snap-cuts --cuts cuts.json --envelope envelope.json --max-total-seconds 
 rushcut check-loop out/short.mp4
 rushcut check-media out/render.mp4 --cuts cuts.json
 rushcut stitch-session rec1.mkv rec2.mkv rec3.mkv rec4.mkv --output session.mkv
+rushcut repair-media rec1.mkv --output rec1.repaired.mkv
 rushcut detect-region-presence session.mkv --box 240,0,80,80 --mode activity
 rushcut profile validate edit_profile.yaml
 ```
@@ -286,9 +287,12 @@ profile. Optional speaker diarization:
 - or pass `turns: [{start_seconds, end_seconds, speaker}]` from any backend
 
 Slice with `start_seconds` / `end_seconds`; returned times stay absolute to
-the source. Long-file chunking, drift checks and caching remain #27; mixed
-mic-vs-mix attribution remains #28; on-screen OCR remains #26; unfinalized
-container repair remains #29.
+the source. Long files are chunked (default 10 min, 30 s overlap),
+drift-checked, and cached when `cache_dir` / `run_dir` is set. Separate mic
+and mix tracks can label words `host` / `other` / `overlap` via
+`attribute_speakers`. On-screen OCR remains #26. Unfinalized recordings
+(MKV with no header duration) are flagged by `probe_media` and remuxed by
+`repair_media` / `stitch_session`.
 
 ### `edit_profile.yaml`
 
@@ -552,6 +556,7 @@ your MCP client config.
 | Resolve backend says scripting is unavailable | You need Resolve **Studio** 21.1+ with External scripting = Local. The free edition has no API. See [docs/RESOLVE.md](docs/RESOLVE.md). |
 | `transcribe_media` returns a soft failure | Install the extra: `pip install -e ".[whisper]"`. |
 | `rushcut check` skips speech boundaries | Pass `--transcript transcript.json` (word timestamps) or a media file with audio. |
+| Probe says `unfinalized_container` / duration is 0 | The MKV was cut off mid-write. `repair_media` / `rushcut repair-media` stream-copy remuxes it (never in place). `stitch_session` remuxes automatically. If `still_writing` is true, wait and retry. |
 | `ModuleNotFoundError: rushcut` after pulling | Re-run `pip install -e .` in `server/.venv` so the new package and console scripts are registered. |
 | `DeprecationWarning: '<old name>' is deprecated` (for example `vegas_director_mcp`) | Harmless (stderr only). Switch your client config to `-m rushcut`. |
 | Transport tools return `unsupported` | Expected on `ffmpeg` and `otio`; there is no playback UI. |

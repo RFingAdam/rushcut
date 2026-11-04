@@ -15,7 +15,7 @@ writes run inside an `UndoBlock` on the UI thread; `project.new` /
 | Project | `project.get_state` | ✅ (includes `media_path`, `media_name`, `take_offset_seconds`, `take_length_seconds`) |
 | Project | `project.get_selected_events` | ✅ |
 | Project | `project.save` | ✅ |
-| Project | `project.new`, `project.open` | ✅ (`save_current_to` or `discard_unsaved`) |
+| Project | `project.new`, `project.open` | ✅ (`save_current_to` or `discard_unsaved`; host-tracked dirty + `project_id` when content was not created by rushcut this session) |
 | Tracks | `track.add` | ✅ (optional `index`) |
 | Tracks | `track.set_composite_level` | ✅ (`VideoTrack.CompositeLevel`) |
 | Tracks | `track.set_props` | ✅ (name / mute / solo / audio volume) |
@@ -37,7 +37,7 @@ writes run inside an `UndoBlock` on the UI thread; `project.new` /
 | Render | `render.status` | ✅ job_id / state / percent (progress events, no UI-marshal wait) |
 | Project | `project.set_video` | ✅ width / height / frame_rate |
 | Host start | Application Extension / Script Menu / `ensure_host` | ✅ live TCP, `/RUNSCRIPT`, or `/CMDMODULE` path; tools set `used_mode` |
-| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `generate_captions`, `burn_captions`, `stitch_session`, `session_lookup`, `detect_region_presence` | ✅ (`transcribe_media` returns word timestamps; optional `diarize`, `initial_prompt`, slice `start_seconds`/`end_seconds`; session time via `offset_map`; captions chunk/mask/karaoke; `burn_captions` timeout/preset/CRF, timeout scaled to program length) |
+| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `generate_captions`, `burn_captions`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `attribute_speakers` | ✅ (`probe_media` flags unfinalized containers and lists audio streams + speech ratio; `repair_media` stream-copy remux; `transcribe_media` chunks/drift-checks/caches long files; `attribute_speakers` labels host/other/overlap from mic vs mix; captions filter/style by speaker) |
 | Quality (no NLE) | `check_output`, `check_parity`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` | ✅ (`rushcut check` CLI; `--parity` layout SSIM/MAD vs an approved cut; speech boundaries, seam envelope scoring, speed-ramp speech guard, must_include, Shorts `duration_cap` / `loop_video` / `loop_audio` / `frame1_not_black`, LUFS, required_features, source_preference) |
 | Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP + CLI; no host RPC) |
 | File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`, `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`, `master_audio`, `audio_cleanup` | ✅ (`cut_media` accepts session time; `concat_media` stream-copies matching codecs else quality preset; `master_audio` two-pass + encode-aware TP; video copy) |

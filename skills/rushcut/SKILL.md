@@ -19,7 +19,9 @@ edits.
    `cut_media` / `transcribe_media` / `detect_region_presence` accept
    session time via `offset_map` + `session_start` / `session_seconds`.
 2. Optional: `detect_scenes`, `analyze_audio`, `transcribe_media`
-   (word timestamps; optional `diarize` or injected speaker `turns`).
+   (chunked/cached word timestamps; optional `diarize`, mic/mix
+   `attribute_speakers`, or injected speaker `turns`).
+   `repair_media` remuxes an unfinalized MKV without touching the source.
    `detect_region_presence(path, box, mode=auto|face|activity)` for a cam
    or overlay box (CPU Haar, or variance/edge activity if OpenCV is missing).
 3. Decide in/out points yourself (this skill does not rank clips).

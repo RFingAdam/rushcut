@@ -237,15 +237,28 @@ def transport_seek(seconds: float) -> dict:
 
 
 @mcp.tool()
-def new_project(save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
-    """Start an empty project. Saves the open one to save_current_to first, or pass discard_unsaved=True."""
-    return tools.new_project(save_current_to, discard_unsaved)
+def new_project(
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
+    """Start an empty project. Saves the open one to save_current_to first, or pass discard_unsaved=True.
+
+    Extension edits may not set VEGAS's dirty `*`. A project with content that
+    was not created by rushcut this session also needs ``project_id``.
+    """
+    return tools.new_project(save_current_to, discard_unsaved, project_id)
 
 
 @mcp.tool()
-def open_project(path: str, save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def open_project(
+    path: str,
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     """Open a .veg (saves or discards the open project first)."""
-    return tools.open_project(path, save_current_to, discard_unsaved)
+    return tools.open_project(path, save_current_to, discard_unsaved, project_id)
 
 
 @mcp.tool()
@@ -358,14 +371,23 @@ def transcribe_media(
     session_end: float | None = None,
     session_seconds: float | None = None,
     initial_prompt: str | None = None,
+    cache_dir: str | None = None,
+    no_cache: bool = False,
+    json_path: str | None = None,
+    run_dir: str | None = None,
+    chunk_seconds: float | None = None,
+    tracks: dict[str, Any] | None = None,
+    lexicon: list[str] | None = None,
 ) -> dict:
     """Word-timestamp transcript, optional speaker diarization. Soft-fails if Whisper is missing.
 
     Pass `words` to skip Whisper (cached transcript). `diarize` is false, true/'auto',
     'stereo' (L/R channels), or 'pyannote' if that extra is installed. Turns may be
     supplied directly. Slice with start_seconds/end_seconds; times stay source-absolute.
+    Long files are chunked, drift-checked, and cached when cache_dir/run_dir is set.
     offset_map + session_start/session_end accept stitch_session time.
-    `initial_prompt` is forwarded to Whisper for vocabulary.
+    `initial_prompt` / lexicon are forwarded to Whisper for vocabulary.
+    `tracks` ({mic, mix}) labels words host/other/overlap from separate audio streams.
     """
     from .analysis.transcript import analyze_transcript as _analyze
 
@@ -383,6 +405,13 @@ def transcribe_media(
         session_end=session_end,
         session_seconds=session_seconds,
         initial_prompt=initial_prompt,
+        cache_dir=cache_dir,
+        no_cache=no_cache,
+        json_path=json_path,
+        run_dir=run_dir,
+        chunk_seconds=chunk_seconds,
+        tracks=tracks,
+        lexicon=lexicon,
     )
 
 
@@ -408,6 +437,8 @@ def generate_captions(
     keep_windows: list[dict[str, Any]] | None = None,
     active_word: bool = False,
     initial_prompt: str | None = None,
+    speakers: list[str] | None = None,
+    speaker_styles: dict[str, str] | None = None,
 ) -> dict:
     """Write SRT + ASS. style is 'default' (16:9) or 'vertical' (9:16). No NLE.
 
@@ -439,6 +470,8 @@ def generate_captions(
         keep_windows=keep_windows,
         active_word=active_word,
         initial_prompt=initial_prompt,
+        speakers=speakers,
+        speaker_styles=speaker_styles,
     )
 
 
@@ -785,6 +818,35 @@ def measure_pacing(
         keywords=keywords,
         words=words,
     )
+
+
+@mcp.tool()
+def repair_media(path: str, output_path: str | None = None) -> dict:
+    """Stream-copy remux an unfinalized recording. Never modifies the source."""
+    from .analysis.session import repair_media as _repair
+
+    return _repair(path, output_path)
+
+
+@mcp.tool()
+def file_still_writing(path: str, window_s: float = 2.0, poll_s: float = 0.0) -> dict:
+    """True when a recording's size or mtime changed within window_s."""
+    from .analysis.probe import file_still_writing as _growing
+
+    return _growing(path, window_s=window_s, poll_s=poll_s)
+
+
+@mcp.tool()
+def attribute_speakers(
+    path: str,
+    tracks: dict[str, Any] | None = None,
+    transcript: dict[str, Any] | list[dict[str, Any]] | None = None,
+    words: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Label transcript words host/other/overlap from separate mic and mix tracks."""
+    from .analysis.speakers import attribute_speakers as _attr
+
+    return _attr(path, tracks=tracks, transcript=transcript, words=words)
 
 
 @mcp.tool()

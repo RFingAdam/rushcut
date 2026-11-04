@@ -12,6 +12,17 @@ required_features:
 source_preference:
   order: [local_recording, platform_vod]
   on_mismatch: fail
+audio:
+  tracks:
+    - {role: mix, audio_index: 0}
+    - {role: mic, audio_index: 1}
+lexicon:
+  hotwords: []
+transcript:
+  chunk_seconds: 600
+  overlap_seconds: 30
+  drift_threshold_s: 0.25
+  model: auto
 quality:
   gate: strict
   speech_boundary:

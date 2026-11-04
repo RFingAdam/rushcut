@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from datetime import UTC, datetime
 from typing import Any
 
 from ..output_policy import check_output_path, make_work_dir, work_named_tempfile
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .probe import probe_media
+from .probe import attach_container_warnings, file_still_writing, probe_media
 
 DEFAULT_GAP_S = 600.0
 _TS_RE = re.compile(
@@ -53,17 +54,39 @@ def recording_start_seconds(path: str) -> tuple[float, str]:
 def is_unfinalized(probe: dict[str, Any] | None) -> bool:
     if not probe or not probe.get("ok"):
         return True
-    if probe.get("unfinalized_container") or probe.get("header_duration_missing"):
+    if probe.get("unfinalized_container") or probe.get("header_duration_missing") or probe.get("cues_missing"):
         return True
     return float(probe.get("duration_seconds") or 0) <= 0
 
 
-def repair_media(path: str, output_path: str | None = None) -> dict[str, Any]:
+def _which_mkvmerge() -> str | None:
+    override = os.environ.get("MKVMERGE_BIN") or os.environ.get("MKVMERGE")
+    if override and os.path.isfile(override):
+        return override
+    return shutil.which("mkvmerge")
+
+
+def repair_media(
+    path: str,
+    output_path: str | None = None,
+    *,
+    growing_window_s: float | None = None,
+) -> dict[str, Any]:
     """Stream-copy remux into a finalized file. Never modifies the source."""
     err = _ok_path(path)
     if err:
         return err
     src = os.path.abspath(path)
+    if growing_window_s is not None:
+        growing = file_still_writing(src, window_s=growing_window_s)
+        if growing.get("still_writing"):
+            return {
+                "ok": False,
+                "error": "file is still being written; try later",
+                "path": src,
+                "still_writing": True,
+                "warnings": ["still_writing"],
+            }
     if not output_path:
         root, ext = os.path.splitext(src)
         output_path = f"{root}.repaired{ext or '.mkv'}"
@@ -76,33 +99,66 @@ def repair_media(path: str, output_path: str | None = None) -> dict[str, Any]:
     parent = os.path.dirname(output_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    method = "ffmpeg"
+    mkvmerge = _which_mkvmerge()
     try:
-        run(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-hide_banner",
-                "-y",
-                "-fflags",
-                "+genpts",
-                "-i",
-                src,
-                "-c",
-                "copy",
-                output_path,
-            ],
-            timeout=180,
-        )
+        if mkvmerge:
+            method = "mkvmerge"
+            run([mkvmerge, "-o", output_path, src], timeout=180)
+        else:
+            run(
+                [
+                    which_ffmpeg("ffmpeg"),
+                    "-hide_banner",
+                    "-y",
+                    "-fflags",
+                    "+genpts",
+                    "-i",
+                    src,
+                    "-c",
+                    "copy",
+                    output_path,
+                ],
+                timeout=180,
+            )
     except FfmpegError as exc:
-        return {"ok": False, "error": str(exc), "path": src}
+        if method == "mkvmerge":
+            try:
+                method = "ffmpeg"
+                run(
+                    [
+                        which_ffmpeg("ffmpeg"),
+                        "-hide_banner",
+                        "-y",
+                        "-fflags",
+                        "+genpts",
+                        "-i",
+                        src,
+                        "-c",
+                        "copy",
+                        output_path,
+                    ],
+                    timeout=180,
+                )
+            except FfmpegError as exc2:
+                return {"ok": False, "error": str(exc2), "path": src}
+        else:
+            return {"ok": False, "error": str(exc), "path": src}
     probe = probe_media(output_path)
-    return {
-        "ok": bool(probe.get("ok")),
+    result = {
+        "ok": bool(probe.get("ok")) and not probe.get("unfinalized_container"),
         "path": src,
         "output_path": output_path,
         "duration_seconds": probe.get("duration_seconds"),
         "unfinalized_container": bool(probe.get("unfinalized_container")),
+        "header_duration_missing": bool(probe.get("header_duration_missing")),
+        "method": method,
         "probe": probe,
     }
+    if probe.get("unfinalized_container"):
+        result["ok"] = False
+        result["error"] = "repair produced an unfinalized container"
+    return attach_container_warnings(result, probe)
 
 
 def _concat_copy(paths: list[str], output_path: str) -> dict[str, Any]:

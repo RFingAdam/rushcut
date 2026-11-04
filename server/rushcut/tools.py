@@ -645,16 +645,31 @@ def transport_seek(seconds: float) -> dict:
 
 
 # ---------------- Phase 3 (2026-10-22) ----------------
-def new_project(save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def new_project(
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     """Close the open project and start an empty one. Saves it first to save_current_to, or needs discard_unsaved=True."""
     p: dict[str, Any] = {"discard_unsaved": discard_unsaved}
-    if save_current_to: p["save_current_to"] = save_current_to
+    if save_current_to:
+        p["save_current_to"] = save_current_to
+    if project_id:
+        p["project_id"] = project_id
     return _call("project.new", p)
 
 
-def open_project(path: str, save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def open_project(
+    path: str,
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     p: dict[str, Any] = {"path": path, "discard_unsaved": discard_unsaved}
-    if save_current_to: p["save_current_to"] = save_current_to
+    if save_current_to:
+        p["save_current_to"] = save_current_to
+    if project_id:
+        p["project_id"] = project_id
     return _call("project.open", p)
 
 
