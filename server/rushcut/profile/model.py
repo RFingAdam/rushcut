@@ -146,6 +146,7 @@ class ShortsSettings(BaseModel):
     audio_jump_db: float = 6.0
     sample_step: float = 0.5
     black_luma: float = 16.0
+    max_edge_fade_seconds: float = 0.08
 
     @field_validator("max_seconds")
     @classmethod

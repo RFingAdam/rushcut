@@ -242,8 +242,9 @@ speaker whose reply is not in the cut list.
 
 `--must-include '[{"t":12,"pre":1,"post":1,"id":"..."}]'` fails when a
 required event's `[t-pre, t+post]` window is not on the cut timeline.
-`check_loop` reports SSIM of the last frames vs frame 1 and the dB jump
-across the audio wrap. `check_media` returns integrated LUFS, true peak,
+`check_loop` reports SSIM of the last frames vs frame 1, the dB jump
+across the audio wrap, and fails a forced edge fade (loops must not
+fade to black or silence). `check_media` returns integrated LUFS, true peak,
 duration and fps, and re-checks speech boundaries on the render.
 
 `rushcut check --parity APPROVED CANDIDATE` is the layout-parity gate for

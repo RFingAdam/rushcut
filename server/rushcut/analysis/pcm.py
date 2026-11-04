@@ -52,6 +52,16 @@ def raised_cosine(t: float) -> float:
     return 0.5 - 0.5 * math.cos(math.pi * t)
 
 
+def ramp_gain(t: float, shape: str = "raised_cosine") -> float:
+    """0 at t=0, 1 at t=1 for the named envelope."""
+    t = min(1.0, max(0.0, t))
+    key = (shape or "raised_cosine").lower()
+    if key == "linear":
+        return t
+    # raised_cosine and cosine
+    return 0.5 - 0.5 * math.cos(math.pi * t)
+
+
 def decode_pcm(
     path: str,
     sample_rate: int = 48000,
@@ -271,8 +281,9 @@ def apply_gain_region(
     *,
     ramp: int = 0,
     channels: int = 1,
+    shape: str = "raised_cosine",
 ) -> None:
-    """Multiply [start, end) by ``gain``, with raised-cosine ramps on each side."""
+    """Multiply [start, end) by ``gain``, with ramps on each side."""
     start = max(0, start)
     end = min(len(samples), end)
     ramp = max(0, int(ramp))
@@ -283,10 +294,10 @@ def apply_gain_region(
     for i in range(start, end):
         if ramp and i < fade_in_end:
             t = (i - start) / ramp
-            g = 1.0 + (gain - 1.0) * raised_cosine(t)
+            g = 1.0 + (gain - 1.0) * ramp_gain(t, shape)
         elif ramp and i >= fade_out_start:
             t = (end - i) / ramp
-            g = 1.0 + (gain - 1.0) * raised_cosine(t)
+            g = 1.0 + (gain - 1.0) * ramp_gain(t, shape)
         else:
             g = gain
         samples[i] = clamp_sample(samples[i] * g)

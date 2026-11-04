@@ -630,7 +630,7 @@ def loop_fades(
     out_s: float = 0.2,
     output_path: str | None = None,
 ) -> dict:
-    """Matching fades at both ends (silence + black) so a loop wraps. No NLE."""
+    """Optional matching fades to silence + black. Do not apply to looping Shorts. No NLE."""
     from .analysis.audio_ops import loop_fades as _loop
 
     return _loop(path, in_s=in_s, out_s=out_s, output_path=output_path)
@@ -851,11 +851,17 @@ def check_loop(
     path: str,
     ssim_min: float = 0.85,
     audio_jump_db: float = 6.0,
+    max_edge_fade_seconds: float = 0.08,
 ) -> dict:
-    """SSIM of last frames vs frame 1, plus first/last 100 ms audio-level continuity. No NLE."""
+    """SSIM last vs frame 1, audio wrap continuity, no forced edge fade. No NLE."""
     from .quality.loop import check_loop as _loop
 
-    return _loop(path, ssim_min=ssim_min, audio_jump_db=audio_jump_db)
+    return _loop(
+        path,
+        ssim_min=ssim_min,
+        audio_jump_db=audio_jump_db,
+        max_edge_fade_seconds=max_edge_fade_seconds,
+    )
 
 
 @mcp.tool()
