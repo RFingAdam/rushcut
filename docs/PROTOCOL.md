@@ -64,8 +64,8 @@ Almost every VEGAS-side failure is a JSON-RPC **result** with
 | `project.get_state` | — | length, track counts, tracks, events |
 | `project.get_selected_events` | — | selected `track_index` / `event_index` |
 | `project.save` | `path?` | omit `path` to save in place |
-| `project.new` | `save_current_to?`, `discard_unsaved?` | one of the two required |
-| `project.open` | `path`, `save_current_to?`, `discard_unsaved?` | |
+| `project.new` | `save_current_to?`, `discard_unsaved?`, `project_id?` | one of save/discard required; content not created this session also needs `project_id` |
+| `project.open` | `path`, `save_current_to?`, `discard_unsaved?`, `project_id?` | same discard rules as `project.new` |
 | `track.add` | `type` (`video`\|`audio`), `name?`, `index?` | |
 | `track.set_composite_level` | `track_index`, `level` | |
 | `track.set_props` | `track_index`, `name?`, `mute?`, `solo?`, `volume?` | |
@@ -91,8 +91,8 @@ Almost every VEGAS-side failure is a JSON-RPC **result** with
 | `transport.stop` | — | |
 | `transport.seek` | `seconds` | cursor position |
 | `render.list_templates` | `renderer_contains?`, `template_contains?`, `limit?`, `offset?` | `limit=0` (host default) = unlimited; `truncated` when a positive limit was hit |
-| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?` | default `async=true` → `BeginRender` + `job_id` |
-| `render.status` | `job_id?` | `{state, percent, output_path}` |
+| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?` | Python rewrites `output_path` to `<name>.partial.mp4`; default `async=true` → `BeginRender` + `job_id`. Refuses paths outside `RUSHCUT_OUTPUT_ROOTS`. |
+| `render.status` | `job_id?` | `{state, percent, output_path, partial_path?}` — `interrupted` if ffmpeg was killed |
 | `project.set_video` | `width?`, `height?`, `frame_rate?` | |
 
 MCP tool names are the Python functions in
@@ -101,11 +101,16 @@ MCP tool names are the Python functions in
 over the RPC names above. See [API_COVERAGE.md](API_COVERAGE.md).
 
 Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
-`transcribe_media`, `generate_captions`, `burn_captions`, `cut_media`,
-`concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`,
-`verify_output`. Helpers `apply_crossfade` / `apply_ducking` /
-`render_with_preset` compose the RPCs above. The FFmpeg backend implements
-the same RPC names and encodes on `render.start`.
+`analyze_noise_floor`, `transcribe_media`, `check_output`, `check_parity`, `validate_profile`,
+`check_seams`, `snap_cuts`, `check_speed_ramps`, `generate_captions`, `burn_captions` (timeout/preset/CRF), `cut_media`,
+`concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`,
+`add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`,
+`loop_fades`, `master_audio`, `audio_cleanup`, `blur_media`, `compose_layout`,
+`track_circle`, `make_text_card`, `pick_frame`, `compose_thumbnail`, `frame_check`,
+`verify_output`, `export_review_pack`, `fits_cap`. Helpers `apply_crossfade` / `apply_ducking` /
+`apply_timeline` / `render_with_preset` compose the RPCs above. `apply_timeline`
+also renders an `edit.json` timeline (schema in [EDIT_JSON.md](EDIT_JSON.md)).
+The FFmpeg backend implements the same RPC names and encodes on `render.start`.
 
 ## Threading
 
@@ -116,12 +121,17 @@ with a WinForms control (`Control.BeginInvoke`). Ordinary calls wait
 wait 30 minutes. Callers do not marshal.
 
 VEGAS wraps a Script Menu run in an `UndoBlock` automatically.
-Application Extensions do **not**. Project mutations from extension
-mode (`track.add`, `project.new`, `project.set_video`, event/media
-edits, …) are therefore wrapped in `new UndoBlock("Vegas Director: …")`
-on that UI thread. Without it, VEGAS raises COM `E_UNEXPECTED`
-(`0x8000FFFF`) even though reads succeed. Nested undo blocks are valid
-in script mode. Render / transport / save / list calls are not wrapped.
+Application Extensions do **not**. Track / event / media / video-property
+mutations from extension mode (`track.add`, `project.set_video`,
+event/media edits, …) are therefore wrapped in
+`new UndoBlock("Vegas Director: …")` on that UI thread. Without it,
+VEGAS raises COM `E_UNEXPECTED` (`0x8000FFFF`) even though reads
+succeed. Nested undo blocks are valid in script mode. Render /
+transport / save / list / `project.new` / `project.open` are not
+wrapped — `NewProject` / `OpenProject` close the current project, so an
+undo block on that project is `E_UNEXPECTED`. Uncaught handler
+exceptions are written to `%LOCALAPPDATA%\vegas-director-mcp\host.log`
+with the method name and HRESULT.
 
 ## Timecodes
 

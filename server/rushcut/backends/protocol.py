@@ -84,6 +84,53 @@ def fail(error: str, **extra: Any) -> dict[str, Any]:
     return out
 
 
+def refuse_discard(
+    *,
+    track_count: int,
+    event_count: int,
+    untitled: bool,
+    created_by_rushcut: bool,
+    project_id: str | None,
+    discard_unsaved: bool,
+    save_current_to: str | None,
+    requested_project_id: str | None,
+    host_dirty: bool = False,
+) -> str | None:
+    """Return an error if new/open would throw away a project with content.
+
+    Extension edits often leave VEGAS's window-title `*` unset, so callers
+    cannot trust that flag. Refuse unless this project was created by
+    rushcut in the same session, or ``discard_unsaved`` is paired with the
+    current ``project_id``.
+    """
+    if save_current_to:
+        return None
+    has_content = int(event_count or 0) > 0 or bool(host_dirty)
+    tracks = int(track_count or 0)
+    events = int(event_count or 0)
+    kind = "Untitled project" if untitled else "Project"
+    counts = f"tracks={tracks}, events={events}"
+    if not discard_unsaved:
+        if has_content:
+            return (
+                f"{kind} has content ({counts}). "
+                "Pass save_current_to, or discard_unsaved=true with project_id."
+            )
+        return "Pass save_current_to (path) to save the open project first, or discard_unsaved=true."
+    if not has_content:
+        return None
+    if created_by_rushcut:
+        return None
+    if requested_project_id and project_id and str(requested_project_id) == str(project_id):
+        return None
+    pid = f" project_id={project_id}" if project_id else " project_id"
+    return (
+        f"{kind} has content ({counts}). "
+        "It was not created by rushcut in this session. "
+        f"Pass discard_unsaved=true with{pid}, or save_current_to."
+    )
+
+
 def unsupported(feature: str, editor: str, hint: str | None = None, **extra: Any) -> dict[str, Any]:
     msg = f"{feature} is not supported on the {editor} backend"
     if hint:

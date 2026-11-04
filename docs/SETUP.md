@@ -5,8 +5,11 @@ host that runs **inside** VEGAS over TCP `127.0.0.1:8752`.
 
 Host tools need VEGAS. `probe_media`, `detect_scenes`, `analyze_audio`,
 `transcribe_media`, `generate_captions`, `cut_media`, `concat_media`,
-`reframe_media`, and `verify_output` are ffmpeg/Python and work with VEGAS
-closed. Headless editing with no VEGAS: [FFMPEG.md](FFMPEG.md).
+`reframe_media`, `master_audio`, `audio_cleanup`, and `verify_output`
+are ffmpeg/Python and work with VEGAS closed. Headless editing with no
+VEGAS: [FFMPEG.md](FFMPEG.md). Optional extras:
+`pip install 'rushcut-mcp[analysis]'` (numpy, encode-aware TP and STFT
+cleanup) and `pip install 'rushcut-mcp[denoise]'` (DeepFilterNet).
 
 ## 1. Script host
 
@@ -87,7 +90,8 @@ run it from the Scripting menu.
 
 Script-menu mode does **not** require the token.
 
-Logs for both modes: `%LOCALAPPDATA%\vegas-director-mcp\host.log`.
+Logs for both modes: `%LOCALAPPDATA%\vegas-director-mcp\host.log`
+(connections plus uncaught handler exceptions with method and HRESULT).
 
 The current host does **not** open `\\.\pipe\vegas-director`. If you
 re-copy the `.cs` file after a git pull, close the old dialog (or restart
@@ -131,6 +135,9 @@ MCP server.
 | `VEGAS_HOST_PIPE_NAME` | `vegas-director` | Unused unless transport is `pipe` |
 | `VEGAS_HOST_TIMEOUT` | `60` | Seconds for ordinary RPCs (`project.save` / `new` / `open` / `render.start` use 1800) |
 | `VEGAS_HOST_TOKEN` | *(file)* | Override the extension token. Otherwise the client reads `%LOCALAPPDATA%\vegas-director-mcp\token` when that file exists. |
+| `RUSHCUT_OUTPUT_ROOTS` | unset | Allowed write roots (`;`-separated or JSON list). Unset = unrestricted + one warning. Example: `D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS` (never `C:`). |
+| `RUSHCUT_WORK_ROOTS` | first output root | Scratch dir for concat lists and ffmpeg intermediates. Defaults off `%TEMP%` / `C:\` when output roots are set. |
+| `RUSHCUT_PROFILE` | unset | `edit_profile.yaml` whose `output_roots` / `work_roots` are used when the env vars are empty. See [examples/windows-edits.edit_profile.yaml](examples/windows-edits.edit_profile.yaml). |
 
 ### MCP client snippet
 
@@ -147,7 +154,8 @@ Cursor / Claude Desktop-style config. Use the venv interpreter and the
       "env": {
         "VEGAS_HOST_TRANSPORT": "tcp",
         "VEGAS_HOST_ADDRESS": "127.0.0.1",
-        "VEGAS_HOST_PORT": "8752"
+        "VEGAS_HOST_PORT": "8752",
+        "RUSHCUT_OUTPUT_ROOTS": "D:\\Adam\\Videos\\ShadowPlay Videos\\Microsoft Flight Simulator\\OBS\\_EDITS"
       }
     }
   }
@@ -209,11 +217,13 @@ back to `.dll`. Re-run `host\build.ps1` (confirm the printed Documents
 path is the OneDrive folder if this PC redirects Documents). Start VEGAS
 again.
 
-Extension-mode **writes** (new project, add track, set video, place an
-event) need this rebuilt DLL: VEGAS does not wrap Application Extension
+Extension-mode **track/event/video writes** (add track, set video, place
+an event) need this rebuilt DLL: VEGAS does not wrap Application Extension
 edits in an undo transaction the way it wraps *Tools > Scripting*, so
-the host now creates an `UndoBlock` on the UI thread. Reads already
-worked; old DLLs still fail writes with `E_UNEXPECTED`.
+the host creates an `UndoBlock` on the UI thread for those mutations.
+`project.new` / `project.open` are not wrapped — an undo block on the
+project being closed is `E_UNEXPECTED`. Reads already worked; old DLLs
+still fail writes with `E_UNEXPECTED`.
 
 **Script Menu:**
 

@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .probe import probe_media
+from .probe import attach_container_warnings, probe_media
 
 _PTS = re.compile(r"pts_time:([0-9.]+)")
 _SCENE = re.compile(r"lavfi\.scene_score=([0-9.]+)")
@@ -89,12 +89,15 @@ def detect_scenes(path: str, threshold: float = 0.30) -> dict[str, Any]:
                 "length_seconds": round(end - start, 4),
             }
         )
-    return {
-        "ok": True,
-        "path": os.path.abspath(path),
-        "threshold": threshold,
-        "duration_seconds": duration,
-        "cut_count": len(cuts),
-        "cuts": cuts,
-        "scenes": scenes,
-    }
+    return attach_container_warnings(
+        {
+            "ok": True,
+            "path": os.path.abspath(path),
+            "threshold": threshold,
+            "duration_seconds": duration,
+            "cut_count": len(cuts),
+            "cuts": cuts,
+            "scenes": scenes,
+        },
+        probe,
+    )

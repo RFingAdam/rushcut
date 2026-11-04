@@ -1,0 +1,8 @@
+ts	phase	decision	why	evidence	result
+2026-11-04T14:15:00Z	start	Add make verify (lint, typecheck, unit tests, CLI smoke) on history from 70c216f	Agents need one fail-fast command so they can work in parallel	main@7917e09: CI job test runs boundary+pytest only; README mentions ruff; no Makefile, no mypy gate, no apply CLI; open PR #2 is release-only	pending
+2026-11-04T14:25:00Z	choice	Pin ruff to E,F,W and ignore E501/E701 instead of default rules	Default ruff is 239 nits; verify must pass on current main	ruff --statistics: 83 BLE001, 50 RUF046, 830 E501; E9/F63/F7/F82 already green; 4 F issues fixed as cleanup	keep
+2026-11-04T14:26:00Z	choice	Typecheck only scripts/check_boundary.py and scripts/verify_smoke.py	Package mypy is 31 errors in 15 files; not this PR	mypy --ignore-missing-imports on server/rushcut → 31 errors	gap
+2026-11-04T14:27:00Z	choice	Add thin rushcut apply CLI wrapping apply_timeline	Smoke must be a real CLI render of a fixture, not a python -c import	apply_timeline exists as library/MCP; CLI had check/export but no render	keep
+2026-11-04T14:28:00Z	prove	make verify passes on this branch (main + verify)	Need a green baseline before the broken-change proof	make verify → 273 passed, smoke duration=0.800s, VERIFY PASSED, 285s	pass
+2026-11-04T14:29:00Z	prove	Deliberate unused import fails lint by name, then revert	Verify must fail fast with VERIFY FAILED: lint	unused_deliberate_break → F401 + VERIFY FAILED: lint; reverted	pass
+2026-11-04T14:30:00Z	prove	Deliberate 9s expected duration fails smoke, then revert	Smoke must reject a bad artifact, not only unit tests	EXPECTED_SECONDS=9.0 → apply exit 1, VERIFY FAILED: smoke — exit code; reverted	pass

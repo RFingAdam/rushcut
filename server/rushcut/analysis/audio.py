@@ -2,15 +2,25 @@
 from __future__ import annotations
 
 import audioop
+import math
 import os
 import struct
 import tempfile
 from typing import Any
 
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .probe import probe_media
+from .probe import attach_container_warnings, probe_media
 
 _DEFAULT_WINDOW = 0.08
+_DBFS_FLOOR = -96.0
+_S16_FULL_SCALE = 32768.0
+
+
+def pcm_dbfs(rms: float) -> float:
+    """Convert a 16-bit PCM RMS value to dBFS."""
+    if rms <= 0:
+        return _DBFS_FLOOR
+    return max(_DBFS_FLOOR, 20.0 * math.log10(float(rms) / _S16_FULL_SCALE))
 
 
 def _decode_mono_pcm(path: str, sample_rate: int = 8000) -> tuple[bytes, int]:
@@ -155,17 +165,56 @@ def analyze_audio(
 
     # Integrated-ish stats from the PCM (linear 16-bit).
     global_rms = audioop.rms(pcm, 2)
+    return attach_container_warnings(
+        {
+            "ok": True,
+            "path": os.path.abspath(path),
+            "has_audio": True,
+            "duration_seconds": probe.get("duration_seconds", 0),
+            "sample_rate": sr,
+            "window_seconds": window_seconds,
+            "median_rms": median_rms,
+            "median_peak": median_peak,
+            "max_peak": max_peak,
+            "global_rms": global_rms,
+            "spike_count": len(spikes),
+            "spikes": spikes,
+        },
+        probe,
+    )
+
+
+def envelope_from_media(
+    path: str,
+    hop_seconds: float = 0.01,
+    sample_rate: int = 8000,
+) -> dict[str, Any]:
+    """Windowed dBFS envelope for seam scoring. No NLE required."""
+    if not path:
+        return {"ok": False, "error": "path is required", "samples": []}
+    if not os.path.isfile(path):
+        return {"ok": False, "error": f"file not found: {path}", "samples": []}
+    try:
+        pcm, sr = _decode_mono_pcm(path, sample_rate=int(sample_rate))
+    except FfmpegError as exc:
+        return {"ok": False, "error": str(exc), "samples": []}
+    if not pcm:
+        return {"ok": False, "error": "decoded audio was empty", "samples": []}
+    hop = max(0.001, float(hop_seconds))
+    windows = _windows(pcm, sr, hop)
+    samples = [
+        {
+            "at_seconds": w["at_seconds"],
+            "dbfs": round(pcm_dbfs(w["rms"]), 3),
+            "rms": w["rms"],
+            "peak": w["peak"],
+        }
+        for w in windows
+    ]
     return {
         "ok": True,
         "path": os.path.abspath(path),
-        "has_audio": True,
-        "duration_seconds": probe.get("duration_seconds", 0),
         "sample_rate": sr,
-        "window_seconds": window_seconds,
-        "median_rms": median_rms,
-        "median_peak": median_peak,
-        "max_peak": max_peak,
-        "global_rms": global_rms,
-        "spike_count": len(spikes),
-        "spikes": spikes,
+        "hop_seconds": hop,
+        "samples": samples,
     }

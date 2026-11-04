@@ -42,4 +42,5 @@ backend, the tool list, and troubleshooting. Report problems on the
 Rushcut is an independent project. It is not affiliated with or endorsed by
 MAGIX or Blackmagic Design. See NOTICE.
 
-MIT licensed. See LICENSE.
+Licensed under AGPL-3.0-or-later, with an additional permission for the VEGAS Pro
+host scripts. See LICENSE and NOTICE.

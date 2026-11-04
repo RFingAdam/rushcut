@@ -12,12 +12,38 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import quote
 from xml.dom import minidom
 
-from .protocol import capability_sheet, fail, ok, unsupported
+from .protocol import capability_sheet, fail, ok, refuse_discard, unsupported
+
+_MUTATING_METHODS = {
+    "track.add",
+    "track.set_composite_level",
+    "track.set_props",
+    "track.clear_events",
+    "media.import",
+    "media.place",
+    "media.replace",
+    "event.add_video",
+    "event.add_audio",
+    "event.add_title",
+    "event.trim",
+    "event.move",
+    "event.delete",
+    "event.set_motion",
+    "event.set_fades",
+    "event.set_opacity",
+    "event.set_gain",
+    "envelope.set_points",
+    "envelope.clear",
+    "marker.add",
+    "marker.delete",
+    "project.set_video",
+}
 
 
 class OtioBackend:
@@ -37,6 +63,10 @@ class OtioBackend:
         self.media: list[dict[str, Any]] = []
         self.markers: list[dict[str, Any]] = []
         self._selected: list[dict[str, Any]] = []
+        self.created_by_rushcut = False
+        self.host_dirty = False
+        self.host_edit_count = 0
+        self.project_id = uuid.uuid4().hex
 
     def ensure(self, project_path: str | None = None) -> dict[str, Any]:
         self.last_mode = "memory"
@@ -129,6 +159,9 @@ class OtioBackend:
         if handler is None:
             return fail(f"Method not found: {method}", code=-32601, editor=self.name)
         result = handler(params)
+        if isinstance(result, dict) and result.get("ok") and method in _MUTATING_METHODS:
+            self.host_dirty = True
+            self.host_edit_count += 1
         if isinstance(result, dict):
             result = dict(result)
             result.setdefault("editor", self.name)
@@ -178,18 +211,57 @@ class OtioBackend:
             fps=self.fps,
             width=self.width,
             height=self.height,
+            project_id=self.project_id,
+            created_by_rushcut=self.created_by_rushcut,
+            dirty=self.host_dirty,
+            host_edit_count=self.host_edit_count,
+            untitled=not bool(self.path),
+            project_path=self.path,
+            track_count=len(self.tracks),
+            event_count=len(events),
         )
 
+    def _content_counts(self) -> tuple[int, int]:
+        events = sum(len(tr.get("events") or []) for tr in self.tracks)
+        return len(self.tracks), events
+
+    def _guard_discard(self, p: dict[str, Any]) -> dict[str, Any] | None:
+        tracks, events = self._content_counts()
+        error = refuse_discard(
+            track_count=tracks,
+            event_count=events,
+            untitled=not bool(self.path),
+            created_by_rushcut=self.created_by_rushcut,
+            project_id=self.project_id,
+            discard_unsaved=bool(p.get("discard_unsaved")),
+            save_current_to=p.get("save_current_to"),
+            requested_project_id=p.get("project_id"),
+            host_dirty=self.host_dirty,
+        )
+        if error:
+            return fail(
+                error,
+                editor=self.name,
+                track_count=tracks,
+                event_count=events,
+                project_id=self.project_id,
+            )
+        return None
+
     def _new(self, p: dict[str, Any]) -> dict[str, Any]:
-        if self.tracks and not p.get("discard_unsaved") and not p.get("save_current_to"):
-            return fail("project has content; pass discard_unsaved=True or save_current_to", editor=self.name)
+        blocked = self._guard_discard(p)
+        if blocked:
+            return blocked
         if p.get("save_current_to"):
             saved = self._save({"path": p["save_current_to"]})
             if not saved.get("ok"):
                 return saved
         self._reset()
+        self.created_by_rushcut = True
+        self.host_dirty = False
+        self.host_edit_count = 0
         self.project_name = p.get("name") or "Untitled"
-        return ok(project_name=self.project_name)
+        return ok(project_name=self.project_name, project_id=self.project_id, created_by_rushcut=True)
 
     def _open(self, p: dict[str, Any]) -> dict[str, Any]:
         path = p.get("path")
@@ -197,6 +269,9 @@ class OtioBackend:
             return fail("path is required", editor=self.name)
         if not os.path.isfile(path):
             return fail(f"file not found: {path}", editor=self.name)
+        blocked = self._guard_discard(p)
+        if blocked:
+            return blocked
         if os.path.splitext(path)[1].lower() != ".otio":
             return fail("otio backend can only re-open .otio files it wrote", editor=self.name)
         with open(path, encoding="utf-8") as fh:
@@ -212,7 +287,11 @@ class OtioBackend:
         self.media = imported.get("media") or []
         self.markers = imported.get("markers") or []
         self.path = path
-        return ok(path=path, project_name=self.project_name)
+        self.created_by_rushcut = False
+        self.host_dirty = False
+        self.host_edit_count = 0
+        self.project_id = os.path.abspath(path)
+        return ok(path=path, project_name=self.project_name, project_id=self.project_id)
 
     def _set_video(self, p: dict[str, Any]) -> dict[str, Any]:
         if p.get("width") is not None:

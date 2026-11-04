@@ -1,0 +1,30 @@
+# Example Windows edit-profile. Roots are configurable; this file pins
+# one output folder. Writes to C: or any other D: tree are refused.
+schema: rushcut.profile/v1
+id: windows-edits
+output_roots:
+  - 'D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS'
+work_roots:
+  - 'D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS'
+required_features:
+  - captions
+  - loudness_normalize
+source_preference:
+  order: [local_recording, platform_vod]
+  on_mismatch: fail
+audio:
+  tracks:
+    - {role: mix, audio_index: 0}
+    - {role: mic, audio_index: 1}
+lexicon:
+  hotwords: []
+transcript:
+  chunk_seconds: 600
+  overlap_seconds: 30
+  drift_threshold_s: 0.25
+  model: auto
+quality:
+  gate: strict
+  speech_boundary:
+    pad_seconds: 0.12
+    mode: fail

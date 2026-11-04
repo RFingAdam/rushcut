@@ -137,7 +137,6 @@ class VegasHostClient:
         # requested on a platform that can't support it.
         try:
             import win32file  # type: ignore
-            import win32pipe  # type: ignore
         except ImportError as exc:
             raise RuntimeError(
                 "Named-pipe transport requires pywin32 and a Windows host. "

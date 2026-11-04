@@ -1,9 +1,12 @@
 """Resolve backend tests. All Resolve objects are fakes — no live app."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from rushcut.backends import reset_backend
 from rushcut.backends.resolve import ResolveBackend
 from rushcut.backends.resolve.connect import FREE_EDITION, SCRIPTING_UNAVAILABLE
+from rushcut.render.atomic import qa_path
 from rushcut import tools
 
 from fake_resolve import FakeResolve
@@ -17,7 +20,7 @@ def _studio(app=None) -> ResolveBackend:
 
 
 def test_ping_and_state_on_studio_mock():
-    backend = _studio()
+    _studio()
     ping = tools.ping()
     assert ping["ok"] is True
     assert ping["editor"] == "resolve"
@@ -64,7 +67,7 @@ def test_free_edition_is_refused():
 
 
 def test_place_trim_move_delete_and_motion():
-    backend = _studio()
+    _studio()
     tools.add_track("video", "Short V1")
     placed = tools.add_video_event(0, r"D:\media\clip.mp4", 0.0, 8.0)
     assert placed["ok"] is True
@@ -106,8 +109,23 @@ def test_render_templates_include_vertical_preset():
     started = tools.render_start(r"D:\out\short.mp4", template_name="H.264 Vertical 1080x1920")
     assert started["ok"] is True
     assert started["job_id"]
+    assert started["partial_path"].endswith(".partial.mp4")
     status = tools.render_status(started["job_id"])
     assert status["state"] == "complete"
+
+
+def test_wait_for_render_verifies_after_resolve_job(color_clip, tmp_path):
+    _studio()
+    dest = tmp_path / "short.mp4"
+    started = tools.render_start(str(dest), template_name="H.264 Vertical 1080x1920")
+    assert started["ok"] is True
+    Path(started["partial_path"]).write_bytes(color_clip.read_bytes())
+    done = tools.wait_for_render(started["job_id"], timeout_seconds=30, poll_seconds=0.05)
+    assert done["ok"] is True, done
+    assert dest.is_file()
+    assert Path(qa_path(str(dest))).is_file()
+    assert done["verify"]["moov_ok"] is True
+    assert done["verify"]["decode_errors"] == 0
 
 
 def test_studio_only_helpers():

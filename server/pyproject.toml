@@ -4,7 +4,7 @@ version = "0.4.0"
 description = "Rushcut MCP: editor-agnostic AI video editing over MCP (FFmpeg-first; VEGAS Pro, DaVinci Resolve, OTIO/FCPXML/MLT backends)."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "RFingAdam" }]
 keywords = ["mcp", "video-editing", "ffmpeg", "vegas-pro", "davinci-resolve", "otio"]
@@ -20,6 +20,8 @@ classifiers = [
 dependencies = [
     "fastmcp>=0.4.0",
     "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "pillow>=10.0",
     # analyze_audio uses audioop, which left the stdlib in Python 3.13.
     "audioop-lts>=0.2.1; python_version >= '3.13'",
 ]
@@ -31,6 +33,7 @@ Issues = "https://github.com/RFingAdam/rushcut/issues"
 Documentation = "https://github.com/RFingAdam/rushcut#readme"
 
 [project.scripts]
+rushcut = "rushcut.cli:main"
 rushcut-mcp = "rushcut:main"
 # Deprecated aliases, kept for one release.
 cutrelay-mcp = "rushcut:main"
@@ -40,11 +43,28 @@ vegas-director-mcp = "rushcut:main"
 [project.optional-dependencies]
 windows = ["pywin32>=306"]
 whisper = ["faster-whisper>=1.0.3"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+analysis = ["numpy>=1.24", "scipy>=1.10"]
+denoise = ["deepfilternet>=0.5"]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10", "numpy>=1.24", "scipy>=1.10"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Default ruff is ~240 style nits on this tree. Gate the rules that would
+# hide a real break (undefined names, unused imports) without a rewrite.
+select = ["E", "F", "W"]
+ignore = ["E501", "E701"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+pretty = true
+warn_unused_ignores = false
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -52,3 +72,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["rushcut*", "cutrelay*", "nle_mcp*", "vegas_director_mcp*"]
+
+[tool.setuptools.package-data]
+"rushcut.formats" = ["*.json"]
+"rushcut.edit" = ["schema.json", "fonts/*"]

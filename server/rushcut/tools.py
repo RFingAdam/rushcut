@@ -5,13 +5,85 @@ import os
 import time
 from typing import Any
 
+from .output_policy import check_output_path
+from .render.atomic import final_path_from_partial, partial_path, promote_partial
 from .session import get_session
+
+_RENDER_JOBS: dict[str, dict[str, Any]] = {}
+_COMPLETE = {"complete", "completed", "done", "success", "finished"}
+_FAILED = {"failed", "fail", "error", "canceled", "cancelled"}
+_INTERRUPTED = {"interrupted", "interrupt", "aborted"}
 
 
 def _call(method: str, params: dict[str, Any] | None = None) -> dict:
     from .backends import get_backend
 
     return get_backend().call(method, params)
+
+
+def reset_render_jobs() -> None:
+    """Test helper."""
+    _RENDER_JOBS.clear()
+
+
+def _remember_job(job_id: str | None, final_path: str, partial: str) -> None:
+    if not job_id:
+        return
+    _RENDER_JOBS[str(job_id)] = {
+        "final_path": final_path,
+        "partial_path": partial,
+        "promoted": False,
+        "started_at": time.time(),
+    }
+
+
+def _this_job_wrote(path: str, started_at: float) -> bool:
+    try:
+        return os.path.getmtime(path) + 0.05 >= started_at
+    except OSError:
+        return False
+
+
+def _promote_job(job_id: str | None, status: dict[str, Any]) -> dict[str, Any]:
+    key = str(job_id or status.get("job_id") or "")
+    info = _RENDER_JOBS.get(key) if key else None
+    if info is None:
+        reported = status.get("partial_path") or status.get("output_path")
+        if reported:
+            reported_s = str(reported)
+            info = {
+                "final_path": final_path_from_partial(reported_s),
+                "partial_path": partial_path(final_path_from_partial(reported_s)),
+                "promoted": False,
+                "started_at": 0.0,
+            }
+            if key:
+                _RENDER_JOBS[key] = info
+    if not info or info.get("promoted"):
+        return status
+    final = info["final_path"]
+    partial = info["partial_path"]
+    started_at = float(info.get("started_at") or 0.0)
+    if not os.path.isfile(partial) and os.path.isfile(final) and _this_job_wrote(final, started_at):
+        # Host ignored the .partial name and wrote the deliverable path.
+        try:
+            os.replace(final, partial)
+        except OSError as exc:
+            out = dict(status)
+            out["ok"] = False
+            out["error"] = f"could not park render for QA: {exc}"
+            return out
+    promoted = promote_partial(partial, final)
+    info["promoted"] = bool(promoted.get("ok"))
+    out = dict(status)
+    out.update(promoted)
+    if promoted.get("ok"):
+        out["ok"] = True
+        out.setdefault("state", "complete")
+    else:
+        out["ok"] = False
+        out.setdefault("state", "failed")
+    return out
 
 
 def ping() -> dict:
@@ -251,10 +323,23 @@ def render_start(
     length_seconds: float | None = None,
     async_render: bool = True,
 ) -> dict:
-    """Start a render. Default is async (Vegas.BeginRender) so the UI marshal returns."""
+    """Start a render. Default is async (Vegas.BeginRender) so the UI marshal returns.
+
+    The backend is asked to write ``<name>.partial.mp4``. The file is
+    renamed to *output_path* only after ``wait_for_render`` (or a
+    blocking start) verifies moov + a full decode.
+    """
     params: dict[str, Any] = {"async": async_render}
+    final_path = output_path
+    partial = None
     if output_path is not None:
-        params["output_path"] = output_path
+        refused = check_output_path(output_path)
+        if refused:
+            return refused
+        final_path = output_path
+        partial = partial_path(output_path)
+        params["output_path"] = partial
+        params["final_path"] = final_path
     if template_name is not None:
         params["template_name"] = template_name
     if renderer_name is not None:
@@ -263,14 +348,45 @@ def render_start(
         params["start_seconds"] = start_seconds
     if length_seconds is not None:
         params["length_seconds"] = length_seconds
-    return _call("render.start", params)
+    result = _call("render.start", params)
+    if isinstance(result, dict):
+        result = dict(result)
+        if final_path:
+            result.setdefault("output_path", final_path)
+            result["partial_path"] = partial
+        job_id = result.get("job_id")
+        if job_id and final_path and partial:
+            _remember_job(str(job_id), final_path, partial)
+        state = str(result.get("state") or "").lower()
+        if (
+            final_path
+            and partial
+            and result.get("ok")
+            and not async_render
+            and state in _COMPLETE
+        ):
+            result = _promote_job(result.get("job_id"), result)
+    return result
 
 
 def render_status(job_id: str | None = None) -> dict:
     params: dict[str, Any] = {}
     if job_id:
         params["job_id"] = job_id
-    return _call("render.status", params)
+    result = _call("render.status", params)
+    if not isinstance(result, dict):
+        return result
+    result = dict(result)
+    state = str(result.get("state") or result.get("status") or "").lower()
+    if state in _INTERRUPTED:
+        result["ok"] = False
+        result["state"] = "interrupted"
+        result.setdefault("error", "render interrupted")
+    info = _RENDER_JOBS.get(str(job_id or result.get("job_id") or ""))
+    if info:
+        result.setdefault("output_path", info["final_path"])
+        result.setdefault("partial_path", info["partial_path"])
+    return result
 
 
 def wait_for_render(
@@ -278,7 +394,10 @@ def wait_for_render(
     timeout_seconds: float = 1800,
     poll_seconds: float = 1.5,
 ) -> dict:
-    """Poll render.status until complete/failed or timeout. Does not block VEGAS."""
+    """Poll render.status until complete/failed/interrupted or timeout.
+
+    On success the ``.partial`` file is decode-checked and renamed.
+    """
     deadline = time.time() + timeout_seconds
     last: dict[str, Any] = {}
     while time.time() < deadline:
@@ -286,11 +405,15 @@ def wait_for_render(
         if not last.get("ok") and last.get("code") == -32601:
             return last
         state = str(last.get("state") or last.get("status") or "").lower()
-        if state in {"complete", "completed", "done", "success", "finished"}:
+        if state in _COMPLETE:
+            return _promote_job(job_id or last.get("job_id"), last)
+        if state in _INTERRUPTED:
             last = dict(last)
-            last["ok"] = True
+            last["ok"] = False
+            last["state"] = "interrupted"
+            last.setdefault("error", "render interrupted")
             return last
-        if state in {"failed", "fail", "error", "canceled", "cancelled"}:
+        if state in _FAILED:
             last = dict(last)
             last["ok"] = False
             last.setdefault("error", f"render {state}")
@@ -392,6 +515,7 @@ def render_with_preset(
     edit_meta: dict[str, Any] | None = None,
     wait: bool = True,
     timeout_seconds: float = 1800,
+    master: bool | None = None,
 ) -> dict:
     """Named preset → async render → poll → ffprobe verify → sidecar JSON."""
     from .render.presets import RENDER_PRESETS, match_preset
@@ -439,16 +563,73 @@ def render_with_preset(
             expect_duration=length_seconds,
         )
         sidecar = write_sidecar(output_path, edit_meta, extra={"preset": preset, "verify": verify})
+    mastered = None
+    want_master = master if master is not None else bool((spec or {}).get("master"))
+    if wait and want_master and os.path.isfile(output_path):
+        from .analysis.loudness import master_audio
+
+        mastered = master_audio(output_path, output_path)
+        if mastered.get("ok") and sidecar and sidecar.get("sidecar_path"):
+            extra = dict((sidecar.get("extra") or {}))
+            extra["master"] = mastered
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+        if verify is not None:
+            verify = verify_output(
+                output_path,
+                expect_width=spec["width"] if spec else None,
+                expect_height=spec["height"] if spec else None,
+                expect_audio=True,
+                expect_duration=length_seconds,
+            )
+    quality = None
+    profile_spec = (edit_meta or {}).get("profile")
+    if wait and profile_spec:
+        from .quality import run_checks
+
+        try:
+            quality = run_checks(
+                target=output_path,
+                profile=profile_spec,
+                transcript=(edit_meta or {}).get("transcript"),
+                cuts=(edit_meta or {}).get("cuts") or (edit_meta or {}).get("edit"),
+                edit=(edit_meta or {}).get("edit"),
+                applied_features=(edit_meta or {}).get("applied_features"),
+                sources=(edit_meta or {}).get("sources"),
+            )
+        except (OSError, ValueError) as exc:
+            quality = {"ok": False, "error": str(exc)}
+        if sidecar and sidecar.get("sidecar_path"):
+            extra = dict((sidecar.get("extra") or {}))
+            extra["quality"] = quality
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+    ok = bool(status.get("ok"))
+    if quality is not None and not quality.get("ok"):
+        ok = False
     return {
-        "ok": bool(status.get("ok")),
+        "ok": ok,
         "used_mode": started.get("used_mode") or status.get("used_mode"),
         "preset": matched,
         "started": started,
         "status": status,
         "verify": verify,
         "sidecar": sidecar,
+        "quality": quality,
+        "master": mastered,
         "output_path": output_path,
     }
+
+
+def export_review_pack(
+    outputs: list[str] | str,
+    dest: str,
+    proxy: str = "720p",
+    chunk_mb: float | None = None,
+    profile: Any = None,
+) -> dict:
+    """Write 720p/1 Mbps proxies, contact sheets, and QA into dest. Finals are only read."""
+    from .render.review_pack import export_review_pack as _export
+
+    return _export(outputs, dest, proxy=proxy, chunk_mb=chunk_mb, profile=profile)
 
 
 def transport_play() -> dict:
@@ -464,16 +645,31 @@ def transport_seek(seconds: float) -> dict:
 
 
 # ---------------- Phase 3 (2026-10-22) ----------------
-def new_project(save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def new_project(
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     """Close the open project and start an empty one. Saves it first to save_current_to, or needs discard_unsaved=True."""
     p: dict[str, Any] = {"discard_unsaved": discard_unsaved}
-    if save_current_to: p["save_current_to"] = save_current_to
+    if save_current_to:
+        p["save_current_to"] = save_current_to
+    if project_id:
+        p["project_id"] = project_id
     return _call("project.new", p)
 
 
-def open_project(path: str, save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def open_project(
+    path: str,
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     p: dict[str, Any] = {"path": path, "discard_unsaved": discard_unsaved}
-    if save_current_to: p["save_current_to"] = save_current_to
+    if save_current_to:
+        p["save_current_to"] = save_current_to
+    if project_id:
+        p["project_id"] = project_id
     return _call("project.open", p)
 
 

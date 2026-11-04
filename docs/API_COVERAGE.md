@@ -5,8 +5,9 @@ Legend: ✅ implemented in host · 🟨 partial / best-effort · ⬜ not started
 Based on Magix VEGAS Pro 22 Scripting FAQ patterns (Tracks/Events, Envelopes,
 Generators, VideoMotion, RenderArgs) and the Application Extensions FAQ
 (`ICustomCommandModule`, Known Folder `Documents\Vegas Application Extensions`,
-including OneDrive-redirected Documents). Extension-mode writes run inside
-an `UndoBlock` on the UI thread.
+including OneDrive-redirected Documents). Extension-mode track/event/media
+writes run inside an `UndoBlock` on the UI thread; `project.new` /
+`project.open` do not (they close the current project).
 
 | Area | MCP / RPC | Status |
 |---|---|---|
@@ -14,7 +15,7 @@ an `UndoBlock` on the UI thread.
 | Project | `project.get_state` | ✅ (includes `media_path`, `media_name`, `take_offset_seconds`, `take_length_seconds`) |
 | Project | `project.get_selected_events` | ✅ |
 | Project | `project.save` | ✅ |
-| Project | `project.new`, `project.open` | ✅ (`save_current_to` or `discard_unsaved`) |
+| Project | `project.new`, `project.open` | ✅ (`save_current_to` or `discard_unsaved`; host-tracked dirty + `project_id` when content was not created by rushcut this session) |
 | Tracks | `track.add` | ✅ (optional `index`) |
 | Tracks | `track.set_composite_level` | ✅ (`VideoTrack.CompositeLevel`) |
 | Tracks | `track.set_props` | ✅ (name / mute / solo / audio volume) |
@@ -36,10 +37,13 @@ an `UndoBlock` on the UI thread.
 | Render | `render.status` | ✅ job_id / state / percent (progress events, no UI-marshal wait) |
 | Project | `project.set_video` | ✅ width / height / frame_rate |
 | Host start | Application Extension / Script Menu / `ensure_host` | ✅ live TCP, `/RUNSCRIPT`, or `/CMDMODULE` path; tools set `used_mode` |
-| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `transcribe_media`, `generate_captions`, `burn_captions` | ✅ |
-| File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio` | ✅ |
-| Edit helpers | `apply_crossfade`, `apply_ducking` | ✅ |
-| Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` | ✅ (preset matching walks the full template list; MAGIX AVC/AAC aliases) |
+| Analysis (no NLE) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `generate_captions`, `burn_captions`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `attribute_speakers` | ✅ (`probe_media` flags unfinalized containers and lists audio streams + speech ratio; `repair_media` stream-copy remux; `transcribe_media` chunks/drift-checks/caches long files; `attribute_speakers` labels host/other/overlap from mic vs mix; captions filter/style by speaker; `burn_captions` timeout/preset/CRF, timeout scaled to program length) |
+| Quality (no NLE) | `check_output`, `check_parity`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` | ✅ (`rushcut check` CLI; `--parity` layout SSIM/MAD vs an approved cut; speech boundaries, seam envelope scoring, speed-ramp speech guard, must_include, Shorts `duration_cap` / `loop_video` / `loop_audio` / `frame1_not_black`, no forced loop fade, LUFS, required_features, source_preference) |
+| Story formats (no NLE) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` | ✅ (MCP + CLI; no host RPC) |
+| File-level ffmpeg | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`, `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`, `master_audio`, `audio_cleanup`, `blur_media`, `compose_layout` | ✅ (`cut_media` accepts session time; `concat_media` stream-copies matching codecs else quality preset; `master_audio` two-pass + encode-aware TP; video copy; `blur_media` / `compose_layout` also work as timeline effects) |
+| Edit helpers | `apply_crossfade`, `apply_ducking`, `apply_timeline` | ✅ (`apply_timeline(edit_json, output)` renders a multi-segment edit.json on FFmpeg or builds it on VEGAS; the older `effect=` audio-ops path still works) |
+| Timeline effects | `zoom`, `speed_ramp`, `lens_zoom`, `compose_layout`, `blur_regions`, `overlay` | ✅ (see [TIMELINE_EFFECTS.md](TIMELINE_EFFECTS.md); `track_circle` + `make_text_card`) |
+| Delivery | `render_with_preset`, `verify_output`, sidecar `<output>.edit.json` + `<name>.qa.json`, `export_review_pack`, `pick_frame`, `compose_thumbnail`, `frame_check` | ✅ (writes `.partial.mp4` + `+faststart`; moov/decode/MD5/fps_exact/LUFS/head_black before rename; output-root policy; `master: true` / `master=true`; review pack proxies + QA + optional chunks; labelled frame sheets) |
 
 Soft failures return JSON-RPC **result** `{ "ok": false, "error": "..." }` (never crash VEGAS).
 

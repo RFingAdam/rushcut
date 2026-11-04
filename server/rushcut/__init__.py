@@ -10,6 +10,7 @@ for existing installs), `resolve` (DaVinci Resolve Studio 21.1+), or `otio`
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastmcp import FastMCP
@@ -237,15 +238,28 @@ def transport_seek(seconds: float) -> dict:
 
 
 @mcp.tool()
-def new_project(save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
-    """Start an empty project. Saves the open one to save_current_to first, or pass discard_unsaved=True."""
-    return tools.new_project(save_current_to, discard_unsaved)
+def new_project(
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
+    """Start an empty project. Saves the open one to save_current_to first, or pass discard_unsaved=True.
+
+    Extension edits may not set VEGAS's dirty `*`. A project with content that
+    was not created by rushcut this session also needs ``project_id``.
+    """
+    return tools.new_project(save_current_to, discard_unsaved, project_id)
 
 
 @mcp.tool()
-def open_project(path: str, save_current_to: str | None = None, discard_unsaved: bool = False) -> dict:
+def open_project(
+    path: str,
+    save_current_to: str | None = None,
+    discard_unsaved: bool = False,
+    project_id: str | None = None,
+) -> dict:
     """Open a .veg (saves or discards the open project first)."""
-    return tools.open_project(path, save_current_to, discard_unsaved)
+    return tools.open_project(path, save_current_to, discard_unsaved, project_id)
 
 
 @mcp.tool()
@@ -344,11 +358,62 @@ def analyze_audio(path: str, spike_ratio: float = 2.2, max_spikes: int = 40) -> 
 
 
 @mcp.tool()
-def transcribe_media(path: str, model_size: str = "base", language: str | None = "en") -> dict:
-    """Optional local Whisper (faster-whisper). Uses GPU if ctranslate2 sees CUDA; else CPU. Soft-fails if not installed."""
-    from .analysis.whisper import transcribe_media as _whisper
+def transcribe_media(
+    path: str | None = None,
+    model_size: str = "base",
+    language: str | None = "en",
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    diarize: bool | str = False,
+    words: list[dict[str, Any]] | None = None,
+    turns: list[dict[str, Any]] | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
+    session_seconds: float | None = None,
+    initial_prompt: str | None = None,
+    cache_dir: str | None = None,
+    no_cache: bool = False,
+    json_path: str | None = None,
+    run_dir: str | None = None,
+    chunk_seconds: float | None = None,
+    tracks: dict[str, Any] | None = None,
+    lexicon: list[str] | None = None,
+) -> dict:
+    """Word-timestamp transcript, optional speaker diarization. Soft-fails if Whisper is missing.
 
-    return _whisper(path, model_size=model_size, language=language)
+    Pass `words` to skip Whisper (cached transcript). `diarize` is false, true/'auto',
+    'stereo' (L/R channels), or 'pyannote' if that extra is installed. Turns may be
+    supplied directly. Slice with start_seconds/end_seconds; times stay source-absolute.
+    Long files are chunked, drift-checked, and cached when cache_dir/run_dir is set.
+    offset_map + session_start/session_end accept stitch_session time.
+    `initial_prompt` / lexicon are forwarded to Whisper for vocabulary.
+    `tracks` ({mic, mix}) labels words host/other/overlap from separate audio streams.
+    """
+    from .analysis.transcript import analyze_transcript as _analyze
+
+    return _analyze(
+        path,
+        words=words,
+        turns=turns,
+        model_size=model_size,
+        language=language,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        diarize=diarize,
+        offset_map=offset_map,
+        session_start=session_start,
+        session_end=session_end,
+        session_seconds=session_seconds,
+        initial_prompt=initial_prompt,
+        cache_dir=cache_dir,
+        no_cache=no_cache,
+        json_path=json_path,
+        run_dir=run_dir,
+        chunk_seconds=chunk_seconds,
+        tracks=tracks,
+        lexicon=lexicon,
+    )
 
 
 @mcp.tool()
@@ -359,41 +424,122 @@ def generate_captions(
     output_dir: str | None = None,
     style: str = "default",
     group_words: bool = True,
+    max_chars: int | None = None,
+    max_words: int = 4,
+    max_gap: float = 0.5,
+    extend_seconds: float = 0.35,
+    split_on_punctuation: bool = True,
+    mask_words: list[str] | None = None,
+    uppercase: bool | None = None,
+    outline: int | None = None,
+    shadow: int | None = None,
+    margin_v: int | None = None,
+    fix_map: dict[str, str] | None = None,
+    keep_windows: list[dict[str, Any]] | None = None,
+    active_word: bool = False,
+    initial_prompt: str | None = None,
+    speakers: list[str] | None = None,
+    speaker_styles: dict[str, str] | None = None,
 ) -> dict:
-    """Write SRT + ASS. style is 'default' (16:9) or 'vertical' (9:16). No NLE."""
+    """Write SRT + ASS. style is 'default' (16:9) or 'vertical' (9:16). No NLE.
+
+    Chunks word timestamps by max_chars / max_words / max_gap / punctuation,
+    then extends each cue ~0.35 s without overlapping the next. fix_map and
+    keep_windows run before chunking. mask_words returns masked_spans for
+    bleeps. active_word writes a karaoke-style ASS preset.
+    """
     from .analysis.captions import generate_captions as _caps
 
-    return _caps(path, segments, words, output_dir, style, group_words)
+    return _caps(
+        path,
+        segments,
+        words,
+        output_dir,
+        style,
+        group_words,
+        max_chars=max_chars,
+        max_words=max_words,
+        max_gap=max_gap,
+        extend_seconds=extend_seconds,
+        split_on_punctuation=split_on_punctuation,
+        mask_words=mask_words,
+        uppercase=uppercase,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+        fix_map=fix_map,
+        keep_windows=keep_windows,
+        active_word=active_word,
+        initial_prompt=initial_prompt,
+        speakers=speakers,
+        speaker_styles=speaker_styles,
+    )
 
 
 @mcp.tool()
-def burn_captions(media_path: str, ass_path: str, output_path: str | None = None) -> dict:
-    """Burn ASS captions into a new MP4 with ffmpeg. No NLE."""
+def burn_captions(
+    media_path: str,
+    ass_path: str,
+    output_path: str | None = None,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
+) -> dict:
+    """Burn ASS captions into a new MP4 with ffmpeg. No NLE.
+
+    timeout / preset / crf are parameters. Default timeout scales with
+    program length (no fixed 300 s cap).
+    """
     from .analysis.captions import burn_captions as _burn
 
-    return _burn(media_path, ass_path, output_path)
+    return _burn(media_path, ass_path, output_path, timeout=timeout, preset=preset, crf=crf)
 
 
 @mcp.tool()
 def cut_media(
-    path: str,
-    start_seconds: float,
+    path: str | None = None,
+    start_seconds: float = 0.0,
     end_seconds: float | None = None,
     output_path: str | None = None,
     length_seconds: float | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_start: float | None = None,
+    session_end: float | None = None,
 ) -> dict:
-    """Trim a media file to a time range with ffmpeg. No NLE."""
+    """Trim a media file to a time range with ffmpeg. No NLE.
+
+    Pass offset_map + session_start/session_end to cut in stitch_session time.
+    """
     from .analysis.edit_ops import cut_media as _cut
 
-    return _cut(path, start_seconds, end_seconds, output_path, length_seconds)
+    return _cut(
+        path,
+        start_seconds,
+        end_seconds,
+        output_path,
+        length_seconds,
+        offset_map=offset_map,
+        session_start=session_start,
+        session_end=session_end,
+    )
 
 
 @mcp.tool()
-def concat_media(paths: list[str], output_path: str) -> dict:
-    """Concatenate media files in order with ffmpeg. No NLE."""
+def concat_media(
+    paths: list[str],
+    output_path: str,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
+) -> dict:
+    """Concatenate media files in order with ffmpeg. No NLE.
+
+    Stream-copies when inputs share codec parameters; otherwise re-encodes
+    with a quality preset (default medium/23). Timeout scales with length.
+    """
     from .analysis.edit_ops import concat_media as _cat
 
-    return _cat(paths, output_path)
+    return _cat(paths, output_path, timeout=timeout, preset=preset, crf=crf)
 
 
 @mcp.tool()
@@ -430,6 +576,392 @@ def normalize_audio(
     from .analysis.edit_ops import normalize_audio as _norm
 
     return _norm(path, output_path, integrated_lufs)
+
+
+@mcp.tool()
+def add_music_bed(
+    path: str,
+    onto: str | None = None,
+    output_path: str | None = None,
+    gain: float = 1.0,
+    duck_under: str | None = None,
+    duck_db: float = -12.0,
+    threshold: float = 0.02,
+    ratio: float = 8.0,
+    attack: float = 20.0,
+    release: float = 200.0,
+    fade_in: float = 0.5,
+    fade_out: float = 0.5,
+) -> dict:
+    """Mix a music bed under a program with sidechain ducking and fades. No NLE."""
+    from .analysis.audio_ops import add_music_bed as _bed
+
+    return _bed(
+        path,
+        onto=onto,
+        output_path=output_path,
+        gain=gain,
+        duck_under=duck_under,
+        duck_db=duck_db,
+        threshold=threshold,
+        ratio=ratio,
+        attack=attack,
+        release=release,
+        fade_in=fade_in,
+        fade_out=fade_out,
+    )
+
+
+@mcp.tool()
+def bleep_spans(
+    path: str,
+    spans: list[dict[str, Any]],
+    output_path: str | None = None,
+    mode: str = "tone",
+    freq: float = 1000.0,
+) -> dict:
+    """Replace time spans with a tone, silence, or reversed audio. Accepts masked_spans. No NLE."""
+    from .analysis.audio_ops import bleep_spans as _bleep
+
+    return _bleep(path, spans, output_path=output_path, mode=mode, freq=freq)
+
+
+@mcp.tool()
+def insert_audio(
+    path: str,
+    clip: str,
+    at: float,
+    output_path: str | None = None,
+    duck_db: float = -6.0,
+    ramp_ms: float = 200.0,
+    ramp_shape: str = "raised_cosine",
+) -> dict:
+    """Insert a voice line into a mix and duck the bed with smooth ramps. No NLE."""
+    from .analysis.audio_ops import insert_audio as _ins
+
+    return _ins(path, clip, at, output_path=output_path, duck_db=duck_db, ramp_ms=ramp_ms, ramp_shape=ramp_shape)
+
+
+@mcp.tool()
+def replace_audio_span(
+    path: str,
+    old_clip: str,
+    new_clip: str | None = None,
+    output_path: str | None = None,
+    at: float | None = None,
+    search_samples: int = 64,
+) -> dict:
+    """Find a previously inserted line (± a few samples) and swap it. No NLE."""
+    from .analysis.audio_ops import replace_audio_span as _rep
+
+    return _rep(path, old_clip, new_clip=new_clip, output_path=output_path, at=at, search_samples=search_samples)
+
+
+@mcp.tool()
+def loop_fades(
+    path: str,
+    in_s: float = 0.2,
+    out_s: float = 0.2,
+    output_path: str | None = None,
+) -> dict:
+    """Optional matching fades to silence + black. Do not apply to looping Shorts. No NLE."""
+    from .analysis.audio_ops import loop_fades as _loop
+
+    return _loop(path, in_s=in_s, out_s=out_s, output_path=output_path)
+
+
+@mcp.tool()
+def apply_timeline(
+    effect: str | None = None,
+    path: str | None = None,
+    output_path: str | None = None,
+    track_index: int | None = None,
+    replace_media: bool = True,
+    params: dict[str, Any] | None = None,
+    edit_json: str | dict[str, Any] | None = None,
+    output: str | None = None,
+    backend: str | None = None,
+) -> dict:
+    """Render an edit.json timeline, or run a named file-level audio effect.
+
+    Pass ``edit_json`` (path or object) and ``output`` for the declarative
+    multi-segment renderer. Pass ``effect`` (music_bed / bleep / ...) for
+    the older file-level audio ops.
+    """
+    from .edit import apply_timeline as _apply
+
+    return _apply(
+        effect,
+        path=path,
+        output_path=output_path,
+        track_index=track_index,
+        replace_media=replace_media,
+        edit_json=edit_json,
+        output=output,
+        backend=backend,
+        **(params or {}),
+    )
+
+
+@mcp.tool()
+def master_audio(
+    path: str,
+    output_path: str | None = None,
+    target_i: float = -14.0,
+    target_tp: float = -1.5,
+    target_lra: float = 11.0,
+    encode_aware: bool = True,
+) -> dict:
+    """Two-pass loudnorm, limiter, encode-aware true peak. Video is copied. No NLE."""
+    from .analysis.loudness import master_audio as _master
+
+    return _master(
+        path,
+        output_path=output_path,
+        target_i=target_i,
+        target_tp=target_tp,
+        target_lra=target_lra,
+        encode_aware=encode_aware,
+    )
+
+
+@mcp.tool()
+def analyze_noise_floor(
+    path: str,
+    window_seconds: float = 1.0,
+    prominence_db: float = 12.0,
+) -> dict:
+    """Per-window band floor dB and detected tonal lines (mid vs side). No NLE."""
+    from .analysis.cleanup import analyze_noise_floor as _floor
+
+    return _floor(path, window_seconds=window_seconds, prominence_db=prominence_db)
+
+
+@mcp.tool()
+def audio_cleanup(
+    path: str,
+    output_path: str | None = None,
+    notches: list[dict[str, Any]] | None = None,
+    hp_hz: float = 80.0,
+    adaptive_tonal: bool = True,
+    ms_mode: bool = False,
+    max_reduction_db: float = 24.0,
+    comparison_clip: bool = False,
+    voice_separate: bool = False,
+) -> dict:
+    """Notch, high-pass, optional adaptive tonal-line and mid/side drone reduction. No NLE."""
+    from .analysis.cleanup import audio_cleanup as _clean
+
+    return _clean(
+        path,
+        output_path=output_path,
+        notches=notches,
+        hp_hz=hp_hz,
+        adaptive_tonal=adaptive_tonal,
+        ms_mode=ms_mode,
+        max_reduction_db=max_reduction_db,
+        comparison_clip=comparison_clip,
+        voice_separate=voice_separate,
+    )
+
+
+@mcp.tool()
+def list_story_formats(summary_only: bool = False) -> dict:
+    """Game-agnostic long-form story formats: titles, thumbnail, 0-15 s hook, spine, pacing targets. No NLE."""
+    from .formats import list_story_formats as _list
+
+    return _list(summary_only=summary_only)
+
+
+@mcp.tool()
+def plan_story_edit(
+    format_id: str,
+    beats: list[dict[str, Any]],
+    target_minutes: float,
+    slots: dict[str, Any] | None = None,
+    vo_gap_seconds: float = 8.0,
+    max_sections: int | None = None,
+) -> dict:
+    """Beat sheet from footage beats [{t_sec, label, value?}]: cold open, sections ending on values, YouTube chapters, VO slots, titles. No NLE."""
+    from .formats import plan_story_edit as _plan
+
+    return _plan(
+        format_id,
+        beats,
+        target_minutes,
+        slots=slots,
+        vo_gap_seconds=vo_gap_seconds,
+        max_sections=max_sections,
+    )
+
+
+@mcp.tool()
+def chapters_from_beats(
+    beats: list[dict[str, Any]],
+    total_seconds: float | None = None,
+    min_chapter_seconds: float = 10.0,
+    intro_title: str = "Intro",
+) -> dict:
+    """YouTube chapters from edited-timeline beats [{t_sec, label, value?}]: first at 0:00, 3+, each 10 s+. No NLE."""
+    from .formats import chapters_from_beats as _chapters
+
+    return _chapters(beats, total_seconds, min_chapter_seconds, intro_title)
+
+
+@mcp.tool()
+def measure_pacing(
+    media_path: str,
+    dead_threshold_s: float = 8.0,
+    promise_keywords: list[str] | None = None,
+    model_size: str = "base",
+    language: str | None = "en",
+    keywords: list[str] | None = None,
+    words: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Narration pacing via local Whisper: wpm, dead stretches, longest gap, words in first 15 s, time to promise. No NLE."""
+    from .analysis.pacing import measure_pacing as _pacing
+
+    return _pacing(
+        media_path,
+        dead_threshold_s,
+        promise_keywords,
+        model_size,
+        language,
+        keywords=keywords,
+        words=words,
+    )
+
+
+@mcp.tool()
+def repair_media(path: str, output_path: str | None = None) -> dict:
+    """Stream-copy remux an unfinalized recording. Never modifies the source."""
+    from .analysis.session import repair_media as _repair
+
+    return _repair(path, output_path)
+
+
+@mcp.tool()
+def file_still_writing(path: str, window_s: float = 2.0, poll_s: float = 0.0) -> dict:
+    """True when a recording's size or mtime changed within window_s."""
+    from .analysis.probe import file_still_writing as _growing
+
+    return _growing(path, window_s=window_s, poll_s=poll_s)
+
+
+@mcp.tool()
+def attribute_speakers(
+    path: str,
+    tracks: dict[str, Any] | None = None,
+    transcript: dict[str, Any] | list[dict[str, Any]] | None = None,
+    words: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Label transcript words host/other/overlap from separate mic and mix tracks."""
+    from .analysis.speakers import attribute_speakers as _attr
+
+    return _attr(path, tracks=tracks, transcript=transcript, words=words)
+
+
+@mcp.tool()
+def stitch_session(
+    paths: list[str],
+    gap_threshold_s: float = 600.0,
+    output_path: str | None = None,
+    session_index: int | None = None,
+    remux_unfinalized: bool = True,
+) -> dict:
+    """Group recording files by gap, remux unfinalized MKVs, concat, return an offset map. No NLE."""
+    from .analysis.session import stitch_session as _stitch
+
+    return _stitch(
+        paths,
+        gap_threshold_s=gap_threshold_s,
+        output_path=output_path,
+        session_index=session_index,
+        remux_unfinalized=remux_unfinalized,
+    )
+
+
+@mcp.tool()
+def session_lookup(
+    offset_map: list[dict[str, Any]],
+    session_seconds: float,
+) -> dict:
+    """Map stitch_session time onto a source file and file-local time. No NLE."""
+    from .analysis.session import lookup_session_time
+
+    return lookup_session_time(offset_map, session_seconds)
+
+
+@mcp.tool()
+def detect_region_presence(
+    path: str,
+    box: dict[str, Any] | list[float],
+    mode: str = "auto",
+    sample_fps: float = 1.0,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    offset_map: list[dict[str, Any]] | None = None,
+    session_seconds: float | None = None,
+    session_end: float | None = None,
+) -> dict:
+    """Per-second overlay or face presence in a region box. CPU Haar or variance/edge fallback. No NLE."""
+    from .analysis.region import detect_region_presence as _detect
+
+    return _detect(
+        path,
+        box,
+        mode=mode,
+        sample_fps=sample_fps,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        offset_map=offset_map,
+        session_seconds=session_seconds,
+        session_end=session_end,
+    )
+
+
+@mcp.tool()
+def check_loop(
+    path: str,
+    ssim_min: float = 0.85,
+    audio_jump_db: float = 6.0,
+    max_edge_fade_seconds: float = 0.08,
+) -> dict:
+    """SSIM last vs frame 1, audio wrap continuity, no forced edge fade. No NLE."""
+    from .quality.loop import check_loop as _loop
+
+    return _loop(
+        path,
+        ssim_min=ssim_min,
+        audio_jump_db=audio_jump_db,
+        max_edge_fade_seconds=max_edge_fade_seconds,
+    )
+
+
+@mcp.tool()
+def check_media(
+    path: str,
+    cuts: dict[str, Any] | list | str | None = None,
+    transcript: dict[str, Any] | list | str | None = None,
+    words: list[dict[str, Any]] | None = None,
+    pad_seconds: float = 0.12,
+    transcribe: bool = True,
+    model_size: str = "base",
+    language: str | None = "en",
+) -> dict:
+    """Integrated LUFS, true peak, duration, fps; re-transcribe the render and flag chopped words at joins."""
+    from .quality.media import check_media as _media
+
+    return _media(
+        path,
+        cuts=cuts,
+        transcript=transcript,
+        words=words,
+        pad_seconds=pad_seconds,
+        transcribe=transcribe,
+        model_size=model_size,
+        language=language,
+    )
 
 
 @mcp.tool()
@@ -519,8 +1051,13 @@ def render_with_preset(
     length_seconds: float | None = None,
     edit_meta: dict[str, Any] | None = None,
     wait: bool = True,
+    master: bool | None = None,
 ) -> dict:
-    """Named preset (vertical / 1080p / 4k): async render, ffprobe verify, sidecar JSON."""
+    """Named preset (vertical / 1080p / 4k): async render, ffprobe verify, sidecar JSON.
+
+    Pass master=true (or set master: true on the preset) to run two-pass
+    master_audio on the rendered file.
+    """
     return tools.render_with_preset(
         output_path,
         preset,
@@ -528,6 +1065,7 @@ def render_with_preset(
         length_seconds=length_seconds,
         edit_meta=edit_meta,
         wait=wait,
+        master=master,
     )
 
 
@@ -538,8 +1076,9 @@ def verify_output(
     expect_height: int | None = None,
     expect_audio: bool = True,
     expect_duration: float | None = None,
+    duration_tolerance: float = 0.6,
 ) -> dict:
-    """ffprobe-check a rendered file (duration, resolution, audio present)."""
+    """ffprobe + full-decode check (moov_ok, decode_errors, md5, fps_exact, LUFS)."""
     from .render.sidecar import verify_output as _verify
 
     return _verify(
@@ -548,15 +1087,371 @@ def verify_output(
         expect_height=expect_height,
         expect_audio=expect_audio,
         expect_duration=expect_duration,
+        duration_tolerance=duration_tolerance,
+        measure_loudness=True,
+        measure_head_black=True,
     )
 
 
 @mcp.tool()
-def write_edit_sidecar(output_path: str, edit_meta: dict[str, Any] | None = None) -> dict:
-    """Write <output>.edit.json (length, hook start, caption style, zoom count, music, template)."""
+def check_parity(
+    approved: str,
+    candidate: str,
+    edit_regions: list | dict | str | None = None,
+    regions: list | dict | str | None = None,
+    time_map: list | dict | str | None = None,
+    samples: int = 24,
+    ssim_min: float = 0.95,
+    mad_max: float = 3.0,
+    presence_region: list | str | None = None,
+    allow_new: float = 0.0,
+    seek_tolerance: int = 0,
+    with_loop: bool = False,
+    with_loudness: bool = False,
+    json_path: str | None = None,
+) -> dict:
+    """Compare a candidate re-render to an approved cut (SSIM/MAD layout parity).
+
+    `rushcut check --parity APPROVED CANDIDATE` is the CLI. Writes JSON to
+    json_path when given; never rely on shell redirection.
+    """
+    from .quality.parity import check_parity as _parity
+
+    return _parity(
+        approved,
+        candidate,
+        edit_regions=edit_regions,
+        regions=regions,
+        time_map=time_map,
+        samples=samples,
+        ssim_min=ssim_min,
+        mad_max=mad_max,
+        presence_region=presence_region,
+        allow_new=allow_new,
+        seek_tolerance=seek_tolerance,
+        with_loop=with_loop,
+        with_loudness=with_loudness,
+        json_path=json_path,
+    )
+
+
+@mcp.tool()
+def check_output(
+    target: str | None = None,
+    profile: str | None = None,
+    transcript: dict[str, Any] | list | str | None = None,
+    cuts: dict[str, Any] | list | str | None = None,
+    edit: dict[str, Any] | str | None = None,
+    applied_features: list[str] | None = None,
+    sources: list | None = None,
+    available_sources: list | None = None,
+    pad_seconds: float | None = None,
+    mode: str | None = None,
+    must_include: list | dict | str | None = None,
+    loop: bool = False,
+    check_media_output: bool = False,
+    envelope: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    window_ms: float | None = None,
+    voiced_threshold_db: float | None = None,
+    ramp_pad_seconds: float | None = None,
+    word_confidence_min: float | None = None,
+    shift_ramps: bool = False,
+) -> dict:
+    """Public quality checks: speech boundaries, required features, source preference,
+    required-event coverage, seam scoring, speed-ramp speech guard, optional
+    loop-seam and check_media on the render.
+
+    `rushcut check` is the CLI. Any director can pass a cut list to validate
+    against a transcript (word timestamps + optional speakers).
+    """
+    from .cli import check_output as _check
+
+    return _check(
+        target=target,
+        profile=profile,
+        transcript=transcript,
+        cuts=cuts,
+        edit=edit,
+        applied_features=applied_features,
+        sources=sources,
+        available_sources=available_sources,
+        pad_seconds=pad_seconds,
+        mode=mode,
+        must_include=must_include,
+        loop=loop,
+        check_media_output=check_media_output,
+        envelope=envelope,
+        mic_audio=mic_audio,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        ramp_pad_seconds=ramp_pad_seconds,
+        word_confidence_min=word_confidence_min,
+        shift_ramps=shift_ramps,
+    )
+
+
+@mcp.tool()
+def check_seams(
+    cuts: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    envelope: dict[str, Any] | list | str | None = None,
+    words: dict[str, Any] | list | None = None,
+    window_ms: float = 300.0,
+    voiced_threshold_db: float = -32.0,
+    fade_seconds: float = 0.04,
+    keep_words: bool = True,
+    max_shift_ms: float | None = None,
+    mode: str = "fail",
+) -> dict:
+    """Score every cut against the mic envelope and word timestamps. Returns per-seam JSON plus a markdown table."""
+    from .quality.seams import check_seams as _seams
+
+    return _seams(
+        cuts,
+        mic_audio=mic_audio,
+        envelope=envelope,
+        words=words,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        fade_seconds=fade_seconds,
+        keep_words=keep_words,
+        max_shift_ms=max_shift_ms,
+        mode=mode,
+    )
+
+
+@mcp.tool()
+def snap_cuts(
+    cuts: dict[str, Any] | list | str | None = None,
+    mic_audio: str | None = None,
+    envelope: dict[str, Any] | list | str | None = None,
+    words: dict[str, Any] | list | None = None,
+    window_ms: float = 300.0,
+    voiced_threshold_db: float = -32.0,
+    max_shift_ms: float | None = None,
+    keep_words: bool = True,
+    max_total_seconds: float | None = None,
+) -> dict:
+    """Snap voiced seams to the nearest envelope dip without dropping covered words or exceeding a length cap."""
+    from .quality.seams import snap_cuts as _snap
+
+    return _snap(
+        cuts,
+        mic_audio=mic_audio,
+        envelope=envelope,
+        words=words,
+        window_ms=window_ms,
+        voiced_threshold_db=voiced_threshold_db,
+        max_shift_ms=max_shift_ms,
+        keep_words=keep_words,
+        max_total_seconds=max_total_seconds,
+    )
+
+
+@mcp.tool()
+def check_speed_ramps(
+    spec: dict[str, Any] | list | None = None,
+    words: dict[str, Any] | list | None = None,
+    pad_seconds: float = 0.08,
+    confidence_min: float = 0.0,
+    shift: bool = False,
+    mode: str = "fail",
+) -> dict:
+    """Flag speed-ramp steps (1/2/4/6x) that overlap a word timestamp. Pad default 80 ms. Bleeped words count."""
+    from .quality.ramps import check_speed_ramps as _ramps
+
+    return _ramps(
+        spec,
+        words=words,
+        pad_seconds=pad_seconds,
+        confidence_min=confidence_min,
+        shift=shift,
+        mode=mode,
+    )
+
+
+@mcp.tool()
+def validate_profile(path: str) -> dict:
+    """Validate edit_profile.yaml (required_features, source_preference, quality pad)."""
+    from .profile import validate_profile_file
+
+    return validate_profile_file(path)
+
+
+@mcp.tool()
+def export_review_pack(
+    outputs: list[str],
+    dest: str,
+    proxy: str = "720p",
+    chunk_mb: float | None = None,
+    profile: str | dict[str, Any] | None = None,
+) -> dict:
+    """Write 720p/1 Mbps proxies, a contact sheet per file, and QA.json/QA.md. Optional chunks. Finals are only read."""
+    return tools.export_review_pack(
+        outputs, dest, proxy=proxy, chunk_mb=chunk_mb, profile=profile
+    )
+
+
+@mcp.tool()
+def fits_cap(
+    spec: dict[str, Any] | list | None = None,
+    max_seconds: float | None = None,
+    fps: float | None = None,
+) -> dict:
+    """Predict output duration from a segment spec (including speed ramps) and test a Shorts cap."""
+    from .formats import fits_cap as _fits
+
+    return _fits(spec, max_seconds=max_seconds, fps=fps)
+
+
+@mcp.tool()
+def write_edit_sidecar(
+    output_path: str,
+    edit_meta: dict[str, Any] | None = None,
+    timeline: dict[str, Any] | None = None,
+) -> dict:
+    """Write <output>.edit.json (metadata + optional full timeline for apply_timeline)."""
     from .render.sidecar import write_sidecar
 
-    return write_sidecar(output_path, edit_meta)
+    return write_sidecar(output_path, edit_meta, timeline=timeline)
+
+
+@mcp.tool()
+def track_circle(
+    path: str,
+    start: float = 0.0,
+    duration: float | None = None,
+    r_min: float = 20.0,
+    r_max: float = 180.0,
+    min_inliers: int = 12,
+    output_path: str | None = None,
+) -> dict:
+    """Track a dark-ring circle. Per-frame [cx, cy, r, inliers] JSON."""
+    from .edit.lens import track_circle as _track
+
+    return _track(
+        path,
+        start=start,
+        duration=duration,
+        r_min=r_min,
+        r_max=r_max,
+        min_inliers=min_inliers,
+        output_path=output_path,
+    )
+
+
+@mcp.tool()
+def compose_layout(
+    path: str,
+    output_path: str,
+    layout: str = "blur_fill",
+    main: list | dict | None = None,
+    inset: dict[str, Any] | None = None,
+    strips: list | None = None,
+    width: int = 1080,
+    height: int = 1920,
+    crop_path: list | None = None,
+    drop_empty_inset: bool = True,
+) -> dict:
+    """Reframe a source into blur_fill / split / center / square (9:16 or 1:1)."""
+    from .edit.frames import compose_layout as _layout
+
+    params: dict[str, Any] = {
+        "width": width,
+        "height": height,
+        "drop_empty_inset": drop_empty_inset,
+    }
+    if main is not None:
+        params["main"] = main
+    if inset is not None:
+        params["inset"] = inset
+    if strips is not None:
+        params["strips"] = strips
+    if crop_path is not None:
+        params["crop_path"] = crop_path
+    return _layout(path, output_path, layout, **params)
+
+
+@mcp.tool()
+def blur_media(
+    path: str,
+    regions: list[dict[str, Any]],
+    output_path: str,
+    lossless: bool = False,
+) -> dict:
+    """Blur, pixelate, or fill rectangles on a file (also an apply_timeline effect)."""
+    from .edit.apply import blur_media as _blur
+
+    return _blur(path, regions, output_path, lossless=lossless)
+
+
+@mcp.tool()
+def make_text_card(
+    lines: list[str] | str,
+    output_path: str,
+    style: dict[str, Any] | None = None,
+    width: int = 1080,
+    height: int | None = None,
+) -> dict:
+    """Render a 1-3 line title-card PNG (bundled OFL font, stroke, shadow, rounded box)."""
+    from .edit.text import make_text_card as _card
+
+    return _card(lines, output_path, style=style, width=width, height=height)
+
+
+@mcp.tool()
+def pick_frame(
+    path: str,
+    start: float = 0.0,
+    end: float | None = None,
+    avoid_blink: bool = False,
+    avoid_motion: bool = False,
+) -> dict:
+    """Sharpest frame in a range (Laplacian variance). Returns time + score."""
+    from .edit.frames import pick_frame as _pick
+
+    return _pick(path, start, end, avoid_blink=avoid_blink, avoid_motion=avoid_motion)
+
+
+@mcp.tool()
+def compose_thumbnail(
+    frames: list[str] | str,
+    output_path: str,
+    layout: str = "single",
+    texts: list[str] | None = None,
+    size: str = "1280x720",
+    arrows: bool = False,
+    boxes: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Single or left/right-split thumbnail with big stroked text (1280x720 or 1080x1920)."""
+    from .edit.frames import compose_thumbnail as _thumb
+
+    return _thumb(frames, output_path, layout=layout, texts=texts, size=size, arrows=arrows, boxes=boxes)
+
+
+@mcp.tool()
+def frame_check(
+    path: str,
+    times: list | None = None,
+    output_dir: str | None = None,
+    include_ends: bool = True,
+) -> dict:
+    """Grab frames at labelled times (plus first/last) into PNGs, a sheet, and JSON."""
+    from .edit.frames import frame_check as _check
+    from .profile import load_profile
+
+    profile = None
+    profile_path = os.environ.get("RUSHCUT_PROFILE")
+    if profile_path:
+        try:
+            profile = load_profile(profile_path)
+        except (OSError, ValueError):
+            profile = None
+    dest = output_dir
+    if dest is None and profile is not None:
+        dest = profile.frame_check_dir or (profile.review.frame_check_dir if profile.review else None)
+    return _check(path, times=times, output_dir=dest, include_ends=include_ends, profile=profile)
 
 
 @mcp.tool()
@@ -614,6 +1509,9 @@ def resolve_set_voice_isolation(track_index: int, event_index: int, enabled: boo
 
 
 def main() -> None:
+    from .output_policy import report_stale_partials
+
+    report_stale_partials()
     mcp.run()
 
 

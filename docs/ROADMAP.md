@@ -35,20 +35,31 @@ Pure Python + ffmpeg (no VEGAS):
 - `probe_media` (ffprobe)
 - `detect_scenes` (ffmpeg scene score)
 - `analyze_audio` — windowed RMS/peak spikes
-- `transcribe_media` — optional `faster-whisper`; CUDA if ctranslate2 sees a GPU, else CPU int8; soft-fail if the extra is missing
-- `generate_captions` / `burn_captions` — generic SRT + ASS and ffmpeg burn-in
-- File-level `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`
+- `transcribe_media` / `analyze_transcript` — optional `faster-whisper`; word timestamps; 10 min chunks with overlap, drift check, and cache; optional speaker diarization (injected turns, stereo L/R, pyannote if installed); `attribute_speakers` for mic vs mix (#28); slice mode with source-absolute times
+- `probe_media` / `repair_media` — unfinalized MKV flags (`header_duration_missing`, `cues_missing`, estimated duration) and stream-copy remux (#29)
+- `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `must_include`, `required_features`, `source_preference` (local recording over platform VOD), `check_seams` / `snap_cuts`, speed-ramp speech guard
+- `rushcut check --parity` / `check_parity` — layout SSIM/MAD vs an approved cut (#51)
+- `stitch_session` / `detect_region_presence` / `check_loop` / `check_media`
+- `edit_profile.yaml` safeguard fields (`schema: rushcut.profile/v1`) — full schema remains #17
+- `generate_captions` / `burn_captions` — SRT + ASS (chunking, mask, karaoke) and ffmpeg burn-in (timeout/preset/CRF; timeout scaled to program length)
+- File-level `cut_media`, `concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`
+- `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`
+- `master_audio` (two-pass loudnorm + limiter + encode-aware TP)
+- `analyze_noise_floor` / `audio_cleanup`
 
 Host-backed helpers:
 
-- `apply_crossfade`, `apply_ducking`
+- `apply_crossfade`, `apply_ducking`, `apply_timeline` (edit.json renderer + audio ops)
 - `project.set_video` — output frame size / fps
 
 ## Phase 4 — Render & delivery (complete)
 - Named presets: `vertical` (1080×1920), `1080p`, `4k` via `render_with_preset`
 - `render.start(async=true)` uses documented `Vegas.BeginRender` + `RenderProgress` / `RenderFinished`
 - `render_status` / `wait_for_render` poll from Python (never sit on the UI-marshal wait)
-- `verify_output` (ffprobe: duration, resolution, audio)
+- `verify_output` (ffprobe + full decode: `moov_ok`, `decode_errors`, `md5`, `fps_exact`, `frame_count`, `av_offset_ms`, LUFS/TP, `head_black_s`)
+- `pick_frame` / `compose_thumbnail` / `frame_check`
+- Atomic render: `<name>.partial.mp4` + `+faststart`, rename only after QA, `<name>.qa.json`
+- Output-root policy: `RUSHCUT_OUTPUT_ROOTS` / `output_roots` (work roots for scratch)
 - Sidecar `<output>.edit.json`: length, hook start, caption style, zoom count, music, template
 
 ## Dual-mode host (complete, documented against Pro 22 help)
