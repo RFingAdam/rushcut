@@ -495,3 +495,36 @@ def test_legacy_audio_effect_still_works(tmp_path, ffmpeg_bin):
     )
     assert result["ok"] is True, result
     assert result["effect"] == "bleep"
+
+
+def test_cli_apply_missing_edit_exits_1(tmp_path):
+    from rushcut.cli import main as cli_main
+
+    dest = tmp_path / "out.mp4"
+    code = cli_main(["apply", str(tmp_path / "missing.edit.json"), "--output", str(dest)])
+    assert code == 1
+    assert not dest.exists()
+
+
+def test_cli_apply_tiny_render(tmp_path, color_clip):
+    from rushcut.cli import main as cli_main
+
+    dest = tmp_path / "cut.mp4"
+    edit = tmp_path / "fixture.edit.json"
+    edit.write_text(
+        json.dumps(
+            {
+                "schema": "rushcut.edit/v1",
+                "output": {"width": 320, "height": 180, "fps": 24},
+                "join_fade_ms": 0,
+                "segments": [{"source": str(color_clip), "in": 0.0, "out": 0.5}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cli_main(["apply", str(edit), "--output", str(dest)]) == 0
+    assert dest.is_file() and dest.stat().st_size > 0
+    sidecar = Path(str(dest) + ".edit.json")
+    assert sidecar.is_file()
+    probe = probe_media(str(dest))
+    assert abs(float(probe["duration_seconds"]) - 0.5) <= (1.0 / 24.0) + 0.08

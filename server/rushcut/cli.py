@@ -19,7 +19,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
             "`check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
             "`plan-story-edit`, `measure-pacing`, `fits-cap`. "
-            "Review: `export-review-pack`. "
+            "Review: `export-review-pack`. Render: `rushcut apply edit.json -o out.mp4`. "
             "The MCP server is `rushcut-mcp` (or python -m rushcut with no args)."
         ),
     )
@@ -269,6 +269,23 @@ def _build_parser() -> argparse.ArgumentParser:
     cap.add_argument("--max", type=float, default=None, dest="max_seconds")
     cap.add_argument("--fps", type=float, default=None)
     cap.add_argument("--json", action="store_true", dest="as_json")
+
+    apply_cmd = sub.add_parser(
+        "apply",
+        help="Render an edit.json timeline with FFmpeg (or build it on VEGAS / Resolve)",
+    )
+    apply_cmd.add_argument("edit", help="edit.json path or inline JSON object")
+    apply_cmd.add_argument(
+        "--output",
+        "-o",
+        required=True,
+        help="Output media path",
+    )
+    apply_cmd.add_argument(
+        "--backend",
+        default=None,
+        help="ffmpeg (default), vegas, or resolve",
+    )
     return parser
 
 
@@ -592,44 +609,56 @@ def _cmd_profile(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
+def _cmd_apply(args: argparse.Namespace) -> int:
+    from .edit import apply_timeline
+
+    try:
+        payload: Any = _load_json_arg(args.edit)
+        result = apply_timeline(edit_json=payload, output=args.output, backend=args.backend)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"rushcut apply: error: {exc}", file=sys.stderr)
+        return 1
+    _print_json(result)
+    if result.get("ok"):
+        return 0
+    err = result.get("error") or "apply failed"
+    field = result.get("field")
+    if field:
+        print(f"rushcut apply: error: {field}: {err}", file=sys.stderr)
+    else:
+        print(f"rushcut apply: error: {err}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()
         return 0
-    if args.cmd == "check":
-        return _cmd_check(args)
-    if args.cmd == "check-loop":
-        return _cmd_check_loop(args)
-    if args.cmd == "check-media":
-        return _cmd_check_media(args)
-    if args.cmd == "check-seams":
-        return _cmd_check_seams(args)
-    if args.cmd == "snap-cuts":
-        return _cmd_snap_cuts(args)
-    if args.cmd == "stitch-session":
-        return _cmd_stitch(args)
-    if args.cmd == "repair-media":
-        return _cmd_repair(args)
-    if args.cmd == "detect-region-presence":
-        return _cmd_region(args)
-    if args.cmd == "list-story-formats":
-        return _cmd_list_formats(args)
-    if args.cmd == "plan-story-edit":
-        return _cmd_plan(args)
-    if args.cmd == "chapters-from-beats":
-        return _cmd_chapters(args)
-    if args.cmd == "measure-pacing":
-        return _cmd_pacing(args)
-    if args.cmd == "profile":
-        return _cmd_profile(args)
-    if args.cmd == "export-review-pack":
-        return _cmd_export_review_pack(args)
-    if args.cmd == "fits-cap":
-        return _cmd_fits_cap(args)
-    parser.print_help()
-    return 1
+    commands = {
+        "apply": _cmd_apply,
+        "chapters-from-beats": _cmd_chapters,
+        "check": _cmd_check,
+        "check-loop": _cmd_check_loop,
+        "check-media": _cmd_check_media,
+        "check-seams": _cmd_check_seams,
+        "detect-region-presence": _cmd_region,
+        "export-review-pack": _cmd_export_review_pack,
+        "fits-cap": _cmd_fits_cap,
+        "list-story-formats": _cmd_list_formats,
+        "measure-pacing": _cmd_pacing,
+        "plan-story-edit": _cmd_plan,
+        "profile": _cmd_profile,
+        "repair-media": _cmd_repair,
+        "snap-cuts": _cmd_snap_cuts,
+        "stitch-session": _cmd_stitch,
+    }
+    handler = commands.get(args.cmd)
+    if handler is None:
+        parser.print_help()
+        return 1
+    return handler(args)
 
 
 def _cmd_export_review_pack(args: argparse.Namespace) -> int:
