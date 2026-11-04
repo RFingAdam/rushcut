@@ -39,7 +39,12 @@ File-level tools (no timeline required):
 | `normalize_audio` | single-pass ffmpeg `loudnorm` |
 | `master_audio` | two-pass loudnorm, limiter, encode-aware true peak; copies video |
 | `add_music_bed` / `bleep_spans` / `insert_audio` / `replace_audio_span` / `loop_fades` | file-level mix / censor / VO / loop fades |
-| `apply_timeline` | same ops as a named timeline effect |
+| `apply_timeline` | render `edit.json` (segments, J/L cuts, effects) or a named audio op |
+| `compose_layout` | `blur_fill` / `split` / `center` / `square` vertical compositor |
+| `blur_media` | region blur / pixelate / fill |
+| `track_circle` / `lens_zoom` | dark-ring tracker + circular magnify |
+| `make_text_card` / overlay | title-card PNG + image/alpha overlay |
+| `pick_frame` / `compose_thumbnail` / `frame_check` | sharpest frame, split thumbs, labelled contact sheet |
 | `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
 | `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke); burn-in timeout/preset/CRF scale with program length |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (chunked/cached word timestamps; optional diarize / mic-mix attribution; `initial_prompt`) |

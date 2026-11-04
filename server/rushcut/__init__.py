@@ -10,6 +10,7 @@ for existing installs), `resolve` (DaVinci Resolve Studio 21.1+), or `otio`
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastmcp import FastMCP
@@ -671,15 +672,23 @@ def loop_fades(
 
 @mcp.tool()
 def apply_timeline(
-    effect: str,
+    effect: str | None = None,
     path: str | None = None,
     output_path: str | None = None,
     track_index: int | None = None,
     replace_media: bool = True,
     params: dict[str, Any] | None = None,
+    edit_json: str | dict[str, Any] | None = None,
+    output: str | None = None,
+    backend: str | None = None,
 ) -> dict:
-    """Run music_bed / bleep / insert_audio / replace_audio / loop_fades / master / cleanup on a file or the open timeline."""
-    from .edit.timeline import apply_timeline as _apply
+    """Render an edit.json timeline, or run a named file-level audio effect.
+
+    Pass ``edit_json`` (path or object) and ``output`` for the declarative
+    multi-segment renderer. Pass ``effect`` (music_bed / bleep / ...) for
+    the older file-level audio ops.
+    """
+    from .edit import apply_timeline as _apply
 
     return _apply(
         effect,
@@ -687,6 +696,9 @@ def apply_timeline(
         output_path=output_path,
         track_index=track_index,
         replace_media=replace_media,
+        edit_json=edit_json,
+        output=output,
+        backend=backend,
         **(params or {}),
     )
 
@@ -1064,8 +1076,9 @@ def verify_output(
     expect_height: int | None = None,
     expect_audio: bool = True,
     expect_duration: float | None = None,
+    duration_tolerance: float = 0.6,
 ) -> dict:
-    """ffprobe + full-decode check (moov_ok, decode_errors, md5)."""
+    """ffprobe + full-decode check (moov_ok, decode_errors, md5, fps_exact, LUFS)."""
     from .render.sidecar import verify_output as _verify
 
     return _verify(
@@ -1074,6 +1087,9 @@ def verify_output(
         expect_height=expect_height,
         expect_audio=expect_audio,
         expect_duration=expect_duration,
+        duration_tolerance=duration_tolerance,
+        measure_loudness=True,
+        measure_head_black=True,
     )
 
 
@@ -1290,11 +1306,152 @@ def fits_cap(
 
 
 @mcp.tool()
-def write_edit_sidecar(output_path: str, edit_meta: dict[str, Any] | None = None) -> dict:
-    """Write <output>.edit.json (length, hook start, caption style, zoom count, music, template)."""
+def write_edit_sidecar(
+    output_path: str,
+    edit_meta: dict[str, Any] | None = None,
+    timeline: dict[str, Any] | None = None,
+) -> dict:
+    """Write <output>.edit.json (metadata + optional full timeline for apply_timeline)."""
     from .render.sidecar import write_sidecar
 
-    return write_sidecar(output_path, edit_meta)
+    return write_sidecar(output_path, edit_meta, timeline=timeline)
+
+
+@mcp.tool()
+def track_circle(
+    path: str,
+    start: float = 0.0,
+    duration: float | None = None,
+    r_min: float = 20.0,
+    r_max: float = 180.0,
+    min_inliers: int = 12,
+    output_path: str | None = None,
+) -> dict:
+    """Track a dark-ring circle. Per-frame [cx, cy, r, inliers] JSON."""
+    from .edit.lens import track_circle as _track
+
+    return _track(
+        path,
+        start=start,
+        duration=duration,
+        r_min=r_min,
+        r_max=r_max,
+        min_inliers=min_inliers,
+        output_path=output_path,
+    )
+
+
+@mcp.tool()
+def compose_layout(
+    path: str,
+    output_path: str,
+    layout: str = "blur_fill",
+    main: list | dict | None = None,
+    inset: dict[str, Any] | None = None,
+    strips: list | None = None,
+    width: int = 1080,
+    height: int = 1920,
+    crop_path: list | None = None,
+    drop_empty_inset: bool = True,
+) -> dict:
+    """Reframe a source into blur_fill / split / center / square (9:16 or 1:1)."""
+    from .edit.frames import compose_layout as _layout
+
+    params: dict[str, Any] = {
+        "width": width,
+        "height": height,
+        "drop_empty_inset": drop_empty_inset,
+    }
+    if main is not None:
+        params["main"] = main
+    if inset is not None:
+        params["inset"] = inset
+    if strips is not None:
+        params["strips"] = strips
+    if crop_path is not None:
+        params["crop_path"] = crop_path
+    return _layout(path, output_path, layout, **params)
+
+
+@mcp.tool()
+def blur_media(
+    path: str,
+    regions: list[dict[str, Any]],
+    output_path: str,
+    lossless: bool = False,
+) -> dict:
+    """Blur, pixelate, or fill rectangles on a file (also an apply_timeline effect)."""
+    from .edit.apply import blur_media as _blur
+
+    return _blur(path, regions, output_path, lossless=lossless)
+
+
+@mcp.tool()
+def make_text_card(
+    lines: list[str] | str,
+    output_path: str,
+    style: dict[str, Any] | None = None,
+    width: int = 1080,
+    height: int | None = None,
+) -> dict:
+    """Render a 1-3 line title-card PNG (bundled OFL font, stroke, shadow, rounded box)."""
+    from .edit.text import make_text_card as _card
+
+    return _card(lines, output_path, style=style, width=width, height=height)
+
+
+@mcp.tool()
+def pick_frame(
+    path: str,
+    start: float = 0.0,
+    end: float | None = None,
+    avoid_blink: bool = False,
+    avoid_motion: bool = False,
+) -> dict:
+    """Sharpest frame in a range (Laplacian variance). Returns time + score."""
+    from .edit.frames import pick_frame as _pick
+
+    return _pick(path, start, end, avoid_blink=avoid_blink, avoid_motion=avoid_motion)
+
+
+@mcp.tool()
+def compose_thumbnail(
+    frames: list[str] | str,
+    output_path: str,
+    layout: str = "single",
+    texts: list[str] | None = None,
+    size: str = "1280x720",
+    arrows: bool = False,
+    boxes: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Single or left/right-split thumbnail with big stroked text (1280x720 or 1080x1920)."""
+    from .edit.frames import compose_thumbnail as _thumb
+
+    return _thumb(frames, output_path, layout=layout, texts=texts, size=size, arrows=arrows, boxes=boxes)
+
+
+@mcp.tool()
+def frame_check(
+    path: str,
+    times: list | None = None,
+    output_dir: str | None = None,
+    include_ends: bool = True,
+) -> dict:
+    """Grab frames at labelled times (plus first/last) into PNGs, a sheet, and JSON."""
+    from .edit.frames import frame_check as _check
+    from .profile import load_profile
+
+    profile = None
+    profile_path = os.environ.get("RUSHCUT_PROFILE")
+    if profile_path:
+        try:
+            profile = load_profile(profile_path)
+        except (OSError, ValueError):
+            profile = None
+    dest = output_dir
+    if dest is None and profile is not None:
+        dest = profile.frame_check_dir or (profile.review.frame_check_dir if profile.review else None)
+    return _check(path, times=times, output_dir=dest, include_ends=include_ends, profile=profile)
 
 
 @mcp.tool()
