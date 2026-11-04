@@ -43,6 +43,7 @@ File-level tools (no timeline required):
 | `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke); burn-in timeout/preset/CRF scale with program length |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize; `initial_prompt`) |
 | `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference, Shorts duration/loop |
+| `check_parity` / `rushcut check --parity` | layout SSIM/MAD vs an approved cut; `--json PATH` writes the report |
 | `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |
 | `check_speed_ramps` | flag speed ≠ 1 steps that cover a word |
 | `check_loop` / `rushcut check-loop` | SSIM last vs first, audio wrap |
