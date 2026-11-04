@@ -11,7 +11,7 @@ from typing import Any
 
 from ..output_policy import check_output_path, make_work_dir, work_named_tempfile
 from .ffmpeg_util import encode_timeout_seconds, which_ffmpeg
-from .probe import probe_media, streams_compatible
+from .probe import attach_container_warnings, probe_media, streams_compatible
 
 
 def _ok_path(path: str, label: str = "path") -> dict[str, Any] | None:
@@ -133,16 +133,19 @@ def cut_media(
         output_path,
     )
     if not written.get("ok"):
-        return written
-    return {
-        "ok": True,
-        "output_path": os.path.abspath(output_path),
-        "start_seconds": start,
-        "end_seconds": start + length,
-        "length_seconds": length,
-        "qa_path": written.get("qa_path"),
-        "verify": written.get("verify"),
-    }
+        return attach_container_warnings(written, probe_media(path, speech_ratio=False))
+    return attach_container_warnings(
+        {
+            "ok": True,
+            "output_path": os.path.abspath(output_path),
+            "start_seconds": start,
+            "end_seconds": start + length,
+            "length_seconds": length,
+            "qa_path": written.get("qa_path"),
+            "verify": written.get("verify"),
+        },
+        probe_media(path, speech_ratio=False),
+    )
 
 
 def concat_media(

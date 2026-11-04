@@ -133,7 +133,12 @@ def verify_output(
     probe = probe_media(path)
     md5 = file_md5(path)
     moov_ok = bool(probe.get("ok")) and has_moov_atom(path)
-    if probe.get("unfinalized_container") or probe.get("header_duration_missing"):
+    unfinalized = bool(
+        probe.get("unfinalized_container")
+        or probe.get("header_duration_missing")
+        or probe.get("cues_missing")
+    )
+    if unfinalized:
         moov_ok = False
     decode_errors = 0
     if decode and os.path.isfile(path):
@@ -178,7 +183,9 @@ def verify_output(
     if expect_duration is not None:
         if abs(duration - expect_duration) > duration_tolerance:
             problems.append(f"duration {duration:.2f}s != {expect_duration:.2f}s ±{duration_tolerance}")
-    if not moov_ok:
+    if unfinalized:
+        problems.append("unfinalized container (header duration or cues missing)")
+    elif not moov_ok:
         problems.append("missing moov atom")
     if decode_errors > 0:
         problems.append(f"{decode_errors} decode error(s)")

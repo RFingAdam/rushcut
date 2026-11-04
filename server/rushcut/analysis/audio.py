@@ -9,7 +9,7 @@ import tempfile
 from typing import Any
 
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
-from .probe import probe_media
+from .probe import attach_container_warnings, probe_media
 
 _DEFAULT_WINDOW = 0.08
 _DBFS_FLOOR = -96.0
@@ -165,20 +165,23 @@ def analyze_audio(
 
     # Integrated-ish stats from the PCM (linear 16-bit).
     global_rms = audioop.rms(pcm, 2)
-    return {
-        "ok": True,
-        "path": os.path.abspath(path),
-        "has_audio": True,
-        "duration_seconds": probe.get("duration_seconds", 0),
-        "sample_rate": sr,
-        "window_seconds": window_seconds,
-        "median_rms": median_rms,
-        "median_peak": median_peak,
-        "max_peak": max_peak,
-        "global_rms": global_rms,
-        "spike_count": len(spikes),
-        "spikes": spikes,
-    }
+    return attach_container_warnings(
+        {
+            "ok": True,
+            "path": os.path.abspath(path),
+            "has_audio": True,
+            "duration_seconds": probe.get("duration_seconds", 0),
+            "sample_rate": sr,
+            "window_seconds": window_seconds,
+            "median_rms": median_rms,
+            "median_peak": median_peak,
+            "max_peak": max_peak,
+            "global_rms": global_rms,
+            "spike_count": len(spikes),
+            "spikes": spikes,
+        },
+        probe,
+    )
 
 
 def envelope_from_media(

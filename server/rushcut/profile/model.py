@@ -163,6 +163,35 @@ class ShortsSettings(BaseModel):
         return value
 
 
+class AudioTrackRole(BaseModel):
+    """Named role for one source audio stream (mic vs mix)."""
+
+    model_config = ConfigDict(extra="allow")
+    role: str
+    stream_index: int | None = None
+    audio_index: int | None = None
+    title: str | None = None
+
+
+class AudioSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    tracks: list[AudioTrackRole] = Field(default_factory=list)
+
+
+class LexiconSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    initial_prompt: str | None = None
+    hotwords: list[str] = Field(default_factory=list)
+
+
+class TranscriptSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    chunk_seconds: float = 600.0
+    overlap_seconds: float = 30.0
+    drift_threshold_s: float = 0.25
+    model: str = "auto"
+
+
 class EditProfile(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
     schema_name: str = Field(default="rushcut.profile/v1", alias="schema")
@@ -177,6 +206,9 @@ class EditProfile(BaseModel):
     frame_check_dir: str | None = None
     output_roots: list[str] = Field(default_factory=list)
     work_roots: list[str] = Field(default_factory=list)
+    audio: AudioSettings = Field(default_factory=AudioSettings)
+    lexicon: LexiconSettings = Field(default_factory=LexiconSettings)
+    transcript: TranscriptSettings = Field(default_factory=TranscriptSettings)
 
     @field_validator("required_features")
     @classmethod

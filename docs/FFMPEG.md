@@ -27,7 +27,8 @@ File-level tools (no timeline required):
 
 | Tool | Role |
 |---|---|
-| `probe_media` | duration, size, fps, audio; flags unfinalized containers |
+| `probe_media` | duration, size, fps, audio streams + speech ratio; flags unfinalized containers |
+| `repair_media` | stream-copy remux of an unfinalized MKV (never in place) |
 | `stitch_session` | group recordings by gap, remux unfinalized MKVs, concat, offset map |
 | `session_lookup` | map session time onto a source file |
 | `detect_region_presence` | per-second overlay/face presence in a box |
@@ -46,7 +47,7 @@ File-level tools (no timeline required):
 | `pick_frame` / `compose_thumbnail` / `frame_check` | sharpest frame, split thumbs, labelled contact sheet |
 | `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
 | `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke); burn-in timeout/preset/CRF scale with program length |
-| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize; `initial_prompt`) |
+| `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (chunked/cached word timestamps; optional diarize / mic-mix attribution; `initial_prompt`) |
 | `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference, Shorts duration/loop |
 | `check_parity` / `rushcut check --parity` | layout SSIM/MAD vs an approved cut; `--json PATH` writes the report |
 | `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |

@@ -204,6 +204,14 @@ def _build_parser() -> argparse.ArgumentParser:
     stitch.add_argument("--session-index", type=int, default=None)
     stitch.add_argument("--json", action="store_true", dest="as_json")
 
+    repair = sub.add_parser(
+        "repair-media",
+        help="Stream-copy remux an unfinalized recording (never in place)",
+    )
+    repair.add_argument("path")
+    repair.add_argument("--output", dest="output_path")
+    repair.add_argument("--json", action="store_true", dest="as_json")
+
     region = sub.add_parser(
         "detect-region-presence",
         help="Per-second overlay or face presence inside a region box",
@@ -492,6 +500,14 @@ def _cmd_stitch(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 2
 
 
+def _cmd_repair(args: argparse.Namespace) -> int:
+    from .analysis.session import repair_media
+
+    result = repair_media(args.path, args.output_path)
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
 def _parse_box(text: str) -> list[float]:
     parts = [p.strip() for p in text.replace("x", ",").split(",") if p.strip()]
     if len(parts) != 4:
@@ -594,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_snap_cuts(args)
     if args.cmd == "stitch-session":
         return _cmd_stitch(args)
+    if args.cmd == "repair-media":
+        return _cmd_repair(args)
     if args.cmd == "detect-region-presence":
         return _cmd_region(args)
     if args.cmd == "list-story-formats":
