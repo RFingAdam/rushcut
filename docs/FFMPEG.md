@@ -32,7 +32,7 @@ File-level tools (no timeline required):
 | `session_lookup` | map session time onto a source file |
 | `detect_region_presence` | per-second overlay/face presence in a box |
 | `cut_media` | trim to a time range (also accepts session time) |
-| `concat_media` | join files in order |
+| `concat_media` | join files in order (stream-copy when codecs match; else quality preset) |
 | `reframe_media` | cover-crop to width × height (optional pan/zoom) |
 | `mix_audio` | mix audio streams |
 | `normalize_audio` | single-pass ffmpeg `loudnorm` |
@@ -40,7 +40,7 @@ File-level tools (no timeline required):
 | `add_music_bed` / `bleep_spans` / `insert_audio` / `replace_audio_span` / `loop_fades` | file-level mix / censor / VO / loop fades |
 | `apply_timeline` | same ops as a named timeline effect |
 | `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
-| `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke), optional burn-in |
+| `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke); burn-in timeout/preset/CRF scale with program length |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` | grounding (word timestamps; optional diarize; `initial_prompt`) |
 | `check_output` / `rushcut check` | speech-boundary, seams, speed ramps, must_include, required features, source preference, Shorts duration/loop |
 | `check_seams` / `snap_cuts` | envelope dBFS at each cut, snap to nearest dip |

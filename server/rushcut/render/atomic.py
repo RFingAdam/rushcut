@@ -162,6 +162,9 @@ def promote_partial(
     expect_height: int | None = None,
     expect_audio: bool = True,
     expect_duration: float | None = None,
+    duration_tolerance: float = 0.6,
+    decode: bool = True,
+    decode_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Verify *partial* and rename to *final_path* only when the check passes.
 
@@ -182,6 +185,9 @@ def promote_partial(
         expect_height=expect_height,
         expect_audio=expect_audio,
         expect_duration=expect_duration,
+        duration_tolerance=duration_tolerance,
+        decode=decode,
+        decode_timeout=decode_timeout,
     )
     if not checked.get("ok"):
         return {

@@ -443,11 +443,22 @@ def generate_captions(
 
 
 @mcp.tool()
-def burn_captions(media_path: str, ass_path: str, output_path: str | None = None) -> dict:
-    """Burn ASS captions into a new MP4 with ffmpeg. No NLE."""
+def burn_captions(
+    media_path: str,
+    ass_path: str,
+    output_path: str | None = None,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
+) -> dict:
+    """Burn ASS captions into a new MP4 with ffmpeg. No NLE.
+
+    timeout / preset / crf are parameters. Default timeout scales with
+    program length (no fixed 300 s cap).
+    """
     from .analysis.captions import burn_captions as _burn
 
-    return _burn(media_path, ass_path, output_path)
+    return _burn(media_path, ass_path, output_path, timeout=timeout, preset=preset, crf=crf)
 
 
 @mcp.tool()
@@ -480,11 +491,21 @@ def cut_media(
 
 
 @mcp.tool()
-def concat_media(paths: list[str], output_path: str) -> dict:
-    """Concatenate media files in order with ffmpeg. No NLE."""
+def concat_media(
+    paths: list[str],
+    output_path: str,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
+) -> dict:
+    """Concatenate media files in order with ffmpeg. No NLE.
+
+    Stream-copies when inputs share codec parameters; otherwise re-encodes
+    with a quality preset (default medium/23). Timeout scales with length.
+    """
     from .analysis.edit_ops import concat_media as _cat
 
-    return _cat(paths, output_path)
+    return _cat(paths, output_path, timeout=timeout, preset=preset, crf=crf)
 
 
 @mcp.tool()

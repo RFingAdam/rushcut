@@ -39,8 +39,8 @@ Pure Python + ffmpeg (no VEGAS):
 - `rushcut check` / `check_output` — speech-boundary pad, turn-completeness, `must_include`, `required_features`, `source_preference` (local recording over platform VOD), `check_seams` / `snap_cuts`, speed-ramp speech guard
 - `stitch_session` / `detect_region_presence` / `check_loop` / `check_media`
 - `edit_profile.yaml` safeguard fields (`schema: rushcut.profile/v1`) — full schema remains #17
-- `generate_captions` / `burn_captions` — SRT + ASS (chunking, mask, karaoke) and ffmpeg burn-in
-- File-level `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`
+- `generate_captions` / `burn_captions` — SRT + ASS (chunking, mask, karaoke) and ffmpeg burn-in (timeout/preset/CRF; timeout scaled to program length)
+- File-level `cut_media`, `concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`
 - `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`
 - `master_audio` (two-pass loudnorm + limiter + encode-aware TP)
 - `analyze_noise_floor` / `audio_cleanup`

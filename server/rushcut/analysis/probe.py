@@ -99,12 +99,16 @@ def probe_media(path: str) -> dict[str, Any]:
     audio = None
     duration_estimated = False
     stream_durations: list[float] = []
+    video_duration = None
+    audio_duration = None
     for stream in data.get("streams") or []:
+        stream_dur = _stream_duration(stream)
         if stream.get("codec_type") == "video" and video is None:
             video = stream
+            video_duration = stream_dur
         elif stream.get("codec_type") == "audio" and audio is None:
             audio = stream
-        stream_dur = _stream_duration(stream)
+            audio_duration = stream_dur
         if stream_dur is not None:
             stream_durations.append(stream_dur)
             if duration <= 0 and stream_dur > duration:
@@ -120,6 +124,8 @@ def probe_media(path: str) -> dict[str, Any]:
         "format_duration_seconds": format_duration,
         "stream_durations": stream_durations,
         "stream_max_duration_seconds": stream_max,
+        "video_duration_seconds": video_duration,
+        "audio_duration_seconds": audio_duration,
         "size_bytes": int(fmt.get("size") or 0) if str(fmt.get("size") or "").isdigit() else None,
         "format_name": fmt.get("format_name"),
         "has_video": video is not None,
@@ -134,8 +140,57 @@ def probe_media(path: str) -> dict[str, Any]:
         result["fps"] = _fps(video)
         result["video_codec"] = video.get("codec_name")
         result["pix_fmt"] = video.get("pix_fmt")
+        result["video_profile"] = video.get("profile")
+        result["video_level"] = video.get("level")
+        result["video_time_base"] = video.get("time_base")
+        result["r_frame_rate"] = video.get("r_frame_rate")
+        result["field_order"] = video.get("field_order")
+        raw_frames = video.get("nb_frames")
+        try:
+            result["nb_frames"] = int(raw_frames) if raw_frames not in (None, "", "N/A") else None
+        except (TypeError, ValueError):
+            result["nb_frames"] = None
     if audio:
         result["audio_codec"] = audio.get("codec_name")
         result["sample_rate"] = int(audio.get("sample_rate") or 0) if audio.get("sample_rate") else None
         result["channels"] = int(audio.get("channels") or 0) if audio.get("channels") else None
+        result["sample_fmt"] = audio.get("sample_fmt")
+        result["channel_layout"] = audio.get("channel_layout")
+        result["audio_profile"] = audio.get("profile")
+        result["audio_time_base"] = audio.get("time_base")
     return result
+
+
+def stream_copy_signature(probe: dict[str, Any]) -> tuple[Any, ...]:
+    """Codec parameters that must match for a concat demuxer stream-copy."""
+    fps = probe.get("fps")
+    try:
+        fps_key = round(float(fps), 3) if fps else None
+    except (TypeError, ValueError):
+        fps_key = None
+    return (
+        bool(probe.get("has_video")),
+        bool(probe.get("has_audio")),
+        probe.get("video_codec"),
+        int(probe.get("width") or 0),
+        int(probe.get("height") or 0),
+        probe.get("pix_fmt"),
+        fps_key,
+        probe.get("r_frame_rate"),
+        probe.get("video_profile"),
+        probe.get("video_level"),
+        probe.get("audio_codec"),
+        probe.get("sample_rate"),
+        probe.get("channels"),
+        probe.get("sample_fmt"),
+        probe.get("channel_layout"),
+        probe.get("audio_profile"),
+    )
+
+
+def streams_compatible(probes: list[dict[str, Any]]) -> bool:
+    """True when every probe shares stream-copy codec parameters."""
+    if not probes or any(not p.get("ok") for p in probes):
+        return False
+    first = stream_copy_signature(probes[0])
+    return all(stream_copy_signature(p) == first for p in probes[1:])
