@@ -24,8 +24,10 @@ VEGAS live host: [docs/SETUP.md](docs/SETUP.md)
 3. `python -m rushcut` (`python -m vegas_director_mcp` still works)
 
 Python tests (no VEGAS, no Resolve): from `server/`, `pip install -e ".[dev]"`
-then `pytest`. They mock the VEGAS host, inject a fake Resolve API, and
-generate tiny ffmpeg clips. Do not point CI at a live Resolve.
+then from the repo root run `make verify`. That is lint, typecheck, `pytest`,
+and one tiny `rushcut apply` smoke render. Tests mock the VEGAS host, inject
+a fake Resolve API, and generate tiny ffmpeg clips. Do not point CI at a
+live Resolve. See [docs/VERIFY.md](docs/VERIFY.md).
 
 Do not describe a GUI-less VEGAS — Pro 22 does not document one.
 
