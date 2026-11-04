@@ -153,7 +153,7 @@ def make_contact_sheet(src: str, dest: str, *, columns: int = 4, rows: int = 4) 
                 "-i",
                 src,
                 "-vf",
-                f"select=eq(n\\,0),scale=160:-2",
+                "select=eq(n\\,0),scale=160:-2",
                 "-frames:v",
                 "1",
                 dest,

@@ -1,7 +1,8 @@
 # edit.json — declarative multi-segment timeline
 
 `apply_timeline(edit_json, output)` renders a JSON timeline in one FFmpeg
-pass (or builds the same events on VEGAS / Resolve). The schema file is
+pass (or builds the same events on VEGAS / Resolve). The CLI is
+`rushcut apply edit.json --output out.mp4`. The schema file is
 `server/rushcut/edit/schema.json`. Validation errors name the bad field
 (`segments[1].out: must be greater than in`).
 

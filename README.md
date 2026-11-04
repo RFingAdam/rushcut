@@ -589,9 +589,11 @@ API and generate tiny clips with ffmpeg, so no editor is needed:
 ```bash
 cd server
 pip install -e ".[dev]"
-pytest -q
-ruff check .
+cd ..
+make verify    # lint, typecheck, unit tests, CLI smoke render
 ```
+
+Details and how to add a done-check: [docs/VERIFY.md](docs/VERIFY.md).
 
 If you change a host method or MCP tool, update
 [docs/API_COVERAGE.md](docs/API_COVERAGE.md) and
