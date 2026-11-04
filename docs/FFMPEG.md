@@ -111,10 +111,15 @@ when the tool transcribes `path`.
 
 ## Loop fades
 
-`loop_fades(path, in_s=0.2, out_s=0.2)` applies matching fades at both
-ends so the last frame flows into the first: the first 0.2 s fades up
-from silence and black, the last 0.2 s fades down to silence and black.
-Use it on Shorts that should wrap.
+`loop_fades(path, in_s=0.2, out_s=0.2)` is an **optional** look: matching
+fades at both ends, first 0.2 s up from silence and black, last 0.2 s
+down to silence and black. It is not applied automatically.
+
+Do **not** use it to make a Short wrap. Seamless loops need the last
+frame to match frame 1 (and the audio wrap to stay level). A forced
+fade-to-black / fade-to-silence is a seam; `check_loop` /
+`rushcut check-loop` fail it. Call `loop_fades` only when you want that
+sting, not when the file should loop.
 
 ## Hum cleanup
 

@@ -337,7 +337,15 @@ def insert_audio(
         ramp_n = int(ramp_s * sr) * ch
         duck_start = max(0, int(round((vo_start - ramp_s) * sr)) * ch)
         duck_end = min(len(bed), int(round((vo_end + ramp_s) * sr)) * ch)
-        apply_gain_region(bed, duck_start, duck_end, duck_gain, ramp=ramp_n, channels=ch)
+        apply_gain_region(
+            bed,
+            duck_start,
+            duck_end,
+            duck_gain,
+            ramp=ramp_n,
+            channels=ch,
+            shape=shape,
+        )
         offset = int(round(vo_start * sr)) * ch
         mix_into(bed, vo, offset, 1.0)
         video_from = path if probe_media(path).get("has_video") else None
@@ -482,10 +490,13 @@ def loop_fades(
     out_s: float = 0.2,
     output_path: str | None = None,
 ) -> dict[str, Any]:
-    """Matching fades at both ends so the last frame flows into the first.
+    """Optional matching fades at both ends (silence + black).
 
     First ``in_s`` seconds fade up from silence and black; last ``out_s``
-    seconds fade down to silence and black. Shorts typically use 0.2 s.
+    seconds fade down to silence and black. This is an explicit look, not
+    a loop fix: seamless loops must *not* get a forced fade (last frame
+    has to match frame 1). ``check_loop`` fails fade-to-black / fade-to-
+    silence. Do not call this to make a Short wrap.
     """
     err = ok_path(path)
     if err:
@@ -536,7 +547,9 @@ def loop_fades(
         "out_s": fade_out,
         "duration_seconds": duration,
         "note": (
-            "First and last 0.2 s (or in_s/out_s) fade to/from silence and "
-            "black so a seamless loop can wrap."
+            "First and last in_s/out_s fade to/from silence and black. "
+            "Optional look only — do not apply to looping Shorts; "
+            "check_loop fails a forced fade (last frame must match frame 1)."
         ),
+        "breaks_loop": True,
     }

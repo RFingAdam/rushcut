@@ -181,6 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
     loop.add_argument("file")
     loop.add_argument("--ssim-min", type=float, default=None)
     loop.add_argument("--audio-jump-db", type=float, default=None)
+    loop.add_argument("--max-edge-fade", type=float, default=None, dest="max_edge_fade_seconds")
     loop.add_argument("--json", action="store_true", dest="as_json")
 
     media = sub.add_parser(
@@ -410,6 +411,8 @@ def _cmd_check_loop(args: argparse.Namespace) -> int:
         kwargs["ssim_min"] = args.ssim_min
     if args.audio_jump_db is not None:
         kwargs["audio_jump_db"] = args.audio_jump_db
+    if getattr(args, "max_edge_fade_seconds", None) is not None:
+        kwargs["max_edge_fade_seconds"] = args.max_edge_fade_seconds
     result = check_loop(args.file, **kwargs)
     _print_json(result)
     if not result.get("ok") or not result.get("pass"):

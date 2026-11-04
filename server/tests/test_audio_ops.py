@@ -14,6 +14,7 @@ from rushcut.analysis.audio_ops import (
 )
 from rushcut.analysis.pcm import decode_pcm, rms_db
 from rushcut.edit.timeline import apply_timeline
+from rushcut.quality.loop import check_loop, check_loop_audio
 
 
 def _wav(ffmpeg_bin: str, dest: Path, expr: str, duration: float, extra: list[str] | None = None) -> Path:
@@ -313,3 +314,68 @@ def test_loop_fades_silence_and_black(tmp_path, ffmpeg_bin):
         raw = frame.read_bytes()
         mean = sum(raw) / max(1, len(raw))
         assert mean < 45, f"{name} frame mean {mean:.1f} (want near black)"
+    # Optional look only: a forced fade must fail the seamless-loop check.
+    assert result.get("breaks_loop") is True
+    looped = check_loop(str(out), ssim_min=0.85)
+    assert looped["ok"] is True
+    assert looped["pass"] is False
+    audio = check_loop_audio(str(out))
+    assert audio["pass"] is False
+    assert audio["edge_fade_in_seconds"] > 0.08 or audio["edge_fade_out_seconds"] > 0.08
+
+
+def test_insert_audio_honors_linear_ramp_shape(tmp_path, ffmpeg_bin):
+    bed = _wav(ffmpeg_bin, tmp_path / "bed.wav", "sine=frequency=220:sample_rate=48000", 1.6)
+    vo = _wav(ffmpeg_bin, tmp_path / "vo.wav", "sine=frequency=880:sample_rate=48000", 0.4)
+    out = tmp_path / "lin.wav"
+    result = insert_audio(
+        str(bed),
+        str(vo),
+        at=0.6,
+        output_path=str(out),
+        duck_db=-12,
+        ramp_ms=200,
+        ramp_shape="linear",
+    )
+    assert result["ok"] is True, result
+    assert result["ramp_shape"] == "linear"
+    samples, sr, ch = decode_pcm(str(out), sample_rate=48000, channels=2)
+    # Ramp-in is 0.40–0.60 (before the VO). Later in the ramp is quieter.
+    unducked = rms_db(samples, int(0.05 * sr) * ch, int(0.25 * sr) * ch)
+    early_ramp = rms_db(samples, int(0.42 * sr) * ch, int(0.48 * sr) * ch)
+    late_ramp = rms_db(samples, int(0.52 * sr) * ch, int(0.58 * sr) * ch)
+    assert unducked > early_ramp > late_ramp, (
+        f"linear ramp not progressing: unducked={unducked:.1f} "
+        f"early={early_ramp:.1f} late={late_ramp:.1f}"
+    )
+
+
+def test_apply_timeline_music_bed_and_insert(tmp_path, ffmpeg_bin):
+    bed = _wav(ffmpeg_bin, tmp_path / "music.wav", "sine=frequency=180:sample_rate=48000", 1.5)
+    voice = _wav(ffmpeg_bin, tmp_path / "voice.wav", "sine=frequency=700:sample_rate=48000", 1.5)
+    program = _wav(ffmpeg_bin, tmp_path / "prog.wav", "aevalsrc=0:s=48000", 1.5)
+    ducked = apply_timeline(
+        "add_music_bed",
+        path=str(program),
+        output_path=str(tmp_path / "tl-bed.wav"),
+        bed=str(bed),
+        duck_under=str(voice),
+        duck_db=-9,
+        fade_in=0,
+        fade_out=0,
+    )
+    assert ducked["ok"] is True, ducked
+    assert ducked["effect"] in {"add_music_bed", "music_bed"}
+    vo = _wav(ffmpeg_bin, tmp_path / "line.wav", "sine=frequency=990:sample_rate=48000", 0.3)
+    inserted = apply_timeline(
+        "insert_audio",
+        path=str(tmp_path / "tl-bed.wav"),
+        output_path=str(tmp_path / "tl-ins.wav"),
+        clip=str(vo),
+        at=0.4,
+        duck_db=-6,
+        ramp_ms=80,
+    )
+    assert inserted["ok"] is True, inserted
+    assert inserted["effect"] == "insert_audio"
+    assert "vo_start" in inserted and "ramp_windows" in inserted

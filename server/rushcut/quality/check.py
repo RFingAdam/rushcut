@@ -428,6 +428,8 @@ def run_checks(
                 audio_kwargs["audio_jump_db"] = float(loop_jump)
             if loop_step is not None:
                 audio_kwargs["sample_step"] = float(loop_step)
+            if shorts is not None:
+                audio_kwargs["max_edge_fade_seconds"] = float(shorts.max_edge_fade_seconds)
             raw_audio = check_loop_audio(media_path, **audio_kwargs)
             checks.append(_apply_gate(raw_audio, gate))
             if shorts is not None:

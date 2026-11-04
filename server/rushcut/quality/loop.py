@@ -15,6 +15,9 @@ DEFAULT_SSIM_MIN = 0.85
 DEFAULT_PSNR_MIN = 20.0
 DEFAULT_AUDIO_JUMP_DB = 6.0
 DEFAULT_SAMPLE_STEP = 0.5
+DEFAULT_MAX_EDGE_FADE_SECONDS = 0.08
+_EDGE_WINDOW_SECONDS = 0.35
+_FADE_BODY_DROP_DB = 3.0
 _SSIM_RE = re.compile(r"All:(\d+(?:\.\d+)?)")
 _PSNR_RE = re.compile(r"average:(\d+(?:\.\d+)?)", re.IGNORECASE)
 
@@ -165,25 +168,30 @@ def _sample_step(first_pcm: bytes, last_pcm: bytes) -> float:
 
 
 def _edge_fade_seconds(pcm: bytes, sample_rate: int, *, from_start: bool) -> float:
-    """Seconds until the envelope reaches half of the window peak (0 if none)."""
+    """Seconds of fade-to-silence at an edge, measured against the far half.
+
+    A forced fade (``loop_fades``) stays well below the body level for
+    tens of milliseconds. Seamless loops must not do that: last frame
+    has to match frame 1, not black or silence.
+    """
     width = 2
-    if len(pcm) < width * 8:
+    if len(pcm) < width * 32:
         return 0.0
-    peak = audioop.rms(pcm, width)
-    if peak <= 0:
-        return 0.0
-    threshold = peak * 0.5
     frame = max(width * 2, int(sample_rate * 0.002) * width)
     n = len(pcm) // frame
-    if n <= 1:
+    if n < 8:
         return 0.0
+    levels = [audioop.rms(pcm[i * frame : (i + 1) * frame], width) for i in range(n)]
+    body = max(levels[n // 2 :]) if from_start else max(levels[: n - n // 2])
+    if body <= 0:
+        return 0.0
+    threshold = body * (10.0 ** (-_FADE_BODY_DROP_DB / 20.0))
     order = range(n) if from_start else range(n - 1, -1, -1)
     for i in order:
-        chunk = pcm[i * frame : (i + 1) * frame]
-        if audioop.rms(chunk, width) >= threshold:
+        if levels[i] >= threshold:
             samples = (i * frame // width) if from_start else ((n - 1 - i) * frame // width)
             return samples / float(sample_rate)
-    return 0.0
+    return (n * frame // width) / float(sample_rate)
 
 
 def check_loop_video(
@@ -314,9 +322,10 @@ def check_loop_audio(
     *,
     audio_jump_db: float = DEFAULT_AUDIO_JUMP_DB,
     sample_step: float = DEFAULT_SAMPLE_STEP,
+    max_edge_fade_seconds: float = DEFAULT_MAX_EDGE_FADE_SECONDS,
     mode: str = "fail",
 ) -> dict[str, Any]:
-    """RMS/LUFS jump, sample-step click, and edge-fade length across the wrap."""
+    """RMS/LUFS jump, sample-step click, and reject a forced edge fade."""
     if str(mode).lower() == "off":
         return {
             "id": "loop_audio",
@@ -357,8 +366,12 @@ def check_loop_audio(
         }
     sample_rate = 48000
     try:
-        first_pcm = _pcm_tail(path, start=True, sample_rate=sample_rate)
-        last_pcm = _pcm_tail(path, start=False, sample_rate=sample_rate)
+        first_long = _pcm_tail(
+            path, start=True, seconds=_EDGE_WINDOW_SECONDS, sample_rate=sample_rate
+        )
+        last_long = _pcm_tail(
+            path, start=False, seconds=_EDGE_WINDOW_SECONDS, sample_rate=sample_rate
+        )
     except FfmpegError as exc:
         return {
             "id": "loop_audio",
@@ -368,21 +381,31 @@ def check_loop_audio(
             "limit": float(audio_jump_db),
             "error": str(exc),
         }
+    take = int(sample_rate * 0.1) * 2
+    first_pcm = first_long[:take]
+    last_pcm = last_long[-take:]
     first_db = round(_rms_db(first_pcm), 2)
     last_db = round(_rms_db(last_pcm), 2)
     jump = round(last_db - first_db, 2)
     abs_jump = abs(jump)
     step = round(_sample_step(first_pcm, last_pcm), 4)
-    fade_in = round(_edge_fade_seconds(first_pcm, sample_rate, from_start=True), 4)
-    fade_out = round(_edge_fade_seconds(last_pcm, sample_rate, from_start=False), 4)
+    fade_in = round(_edge_fade_seconds(first_long, sample_rate, from_start=True), 4)
+    fade_out = round(_edge_fade_seconds(last_long, sample_rate, from_start=False), 4)
+    fade_limit = float(max_edge_fade_seconds)
     jump_ok = abs_jump <= float(audio_jump_db)
     step_ok = step <= float(sample_step)
-    passed = jump_ok and step_ok
+    fade_ok = fade_in <= fade_limit and fade_out <= fade_limit
+    passed = jump_ok and step_ok and fade_ok
     detail_parts = []
     if not jump_ok:
         detail_parts.append(f"audio jump {jump:+.1f} dB (abs {abs_jump:.1f} > {audio_jump_db})")
     if not step_ok:
         detail_parts.append(f"sample step {step:.3f} > {sample_step} FS")
+    if not fade_ok:
+        detail_parts.append(
+            f"forced edge fade in={fade_in:.3f}s out={fade_out:.3f}s "
+            f"(limit {fade_limit:.3f}s; loops must not fade to silence)"
+        )
     return {
         "id": "loop_audio",
         "pass": passed,
@@ -398,6 +421,7 @@ def check_loop_audio(
         "sample_step_limit": float(sample_step),
         "edge_fade_in_seconds": fade_in,
         "edge_fade_out_seconds": fade_out,
+        "max_edge_fade_seconds": fade_limit,
         "detail": "; ".join(detail_parts) or None,
         "path": os.path.abspath(path),
     }
@@ -408,9 +432,10 @@ def check_loop(
     *,
     ssim_min: float = DEFAULT_SSIM_MIN,
     audio_jump_db: float = DEFAULT_AUDIO_JUMP_DB,
+    max_edge_fade_seconds: float = DEFAULT_MAX_EDGE_FADE_SECONDS,
     mode: str = "fail",
 ) -> dict[str, Any]:
-    """SSIM of last frames vs frame 1, plus first/last 100 ms audio-level jump."""
+    """SSIM of last frames vs frame 1, audio wrap, and no forced edge fade."""
     if str(mode).lower() == "off":
         return {
             "id": "loop_seam",
@@ -425,7 +450,12 @@ def check_loop(
     if not os.path.isfile(path):
         return {"ok": False, "id": "loop_seam", "pass": False, "error": f"file not found: {path}"}
     video = check_loop_video(path, ssim_min=ssim_min, mode=mode)
-    audio = check_loop_audio(path, audio_jump_db=audio_jump_db, mode=mode)
+    audio = check_loop_audio(
+        path,
+        audio_jump_db=audio_jump_db,
+        max_edge_fade_seconds=max_edge_fade_seconds,
+        mode=mode,
+    )
     if video.get("error") and not video.get("skipped"):
         return {
             "ok": False,
@@ -457,6 +487,9 @@ def check_loop(
         "audio_last_db": last_db,
         "audio_pass": audio_ok,
         "sample_step": audio.get("sample_step"),
+        "edge_fade_in_seconds": audio.get("edge_fade_in_seconds"),
+        "edge_fade_out_seconds": audio.get("edge_fade_out_seconds"),
+        "max_edge_fade_seconds": float(max_edge_fade_seconds),
         "value": 0 if passed else 1,
         "limit": 0,
         "detail": "; ".join(detail_parts) or None,

@@ -217,6 +217,16 @@ def test_check_loop_fade_to_black_fails(tmp_path, ffmpeg_bin):
     assert code == 2
 
 
+def test_check_loop_does_not_require_or_force_a_fade(tmp_path, ffmpeg_bin):
+    """Seamless loops keep level through the wrap; a forced fade fails."""
+    dest = _clip(ffmpeg_bin, tmp_path / "hold.mp4", 1.5, color="red", freq=440)
+    result = check_loop(str(dest), ssim_min=0.85, audio_jump_db=6.0)
+    assert result["ok"] is True
+    assert result["pass"] is True
+    assert (result.get("edge_fade_in_seconds") or 0) <= 0.08
+    assert (result.get("edge_fade_out_seconds") or 0) <= 0.08
+
+
 def test_check_loop_constant_color_passes(tmp_path, ffmpeg_bin):
     dest = _clip(ffmpeg_bin, tmp_path / "hold.mp4", 1.5, color="red", freq=440)
     result = check_loop(str(dest), ssim_min=0.85, audio_jump_db=6.0)

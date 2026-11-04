@@ -36,7 +36,7 @@ edits.
    - `trim_event`, `move_event`, `set_event_fades`, `set_motion_keyframes`
    - `apply_crossfade` on joins; `apply_ducking` or `add_music_bed` for music under voice
    - `insert_audio` / `replace_audio_span` for VO lines; `bleep_spans` with caption `masked_spans`
-   - `loop_fades(in_s=0.2, out_s=0.2)` when the short should wrap
+   - `loop_fades` only for an explicit fade-to-black sting — never on a looping Short (`check_loop` fails a forced fade)
    - `generate_captions` (chunking, mask, `active_word`) then `burn_captions`, or `add_title`
    - `audio_cleanup` for hum / tonal whine; `master_audio` before delivery
 5. `render_with_preset` (`1080p`, `vertical`, `4k`, optional `master=true`) or `render_start`.
@@ -50,7 +50,8 @@ edits.
    `check_media` on the render: integrated LUFS, true peak, duration, fps,
    and a speech-boundary re-check (chopped words at joins).
    `check_loop` / `rushcut check-loop` for Shorts: SSIM of the last frames
-   vs frame 1, plus audio-level continuity across the wrap.
+   vs frame 1, audio-level continuity across the wrap, and no forced
+   fade-to-black / fade-to-silence at the edges.
    After a re-render of an approved cut, `rushcut check --parity APPROVED
    CANDIDATE --json parity.json` (optional `--edit-region`, `--region`,
    `--time-map`, `--presence-region`, `--with-loop`, `--with-loudness`).
