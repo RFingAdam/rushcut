@@ -11,7 +11,8 @@ import os
 import re
 from typing import Any
 
-from .ffmpeg_util import which_ffmpeg
+from .ffmpeg_util import encode_timeout_seconds, which_ffmpeg
+from .probe import probe_media
 
 # Vertical shorts: short uppercase groups. Landscape allows a longer line.
 DEFAULT_MAX_WORDS = 4
@@ -621,8 +622,16 @@ def burn_captions(
     ass_path: str,
     output_path: str | None = None,
     fontsdir: str | None = None,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
 ) -> dict[str, Any]:
-    """Burn an ASS file into a new MP4 with ffmpeg / libass. No VEGAS required."""
+    """Burn an ASS file into a new MP4 with ffmpeg / libass. No VEGAS required.
+
+    ``timeout``, ``preset``, and ``crf`` are parameters. When ``timeout`` is
+    omitted, the budget scales with program length, resolution, and fps
+    (no fixed 300 s cap).
+    """
     if not os.path.isfile(media_path):
         return {"ok": False, "error": f"file not found: {media_path}"}
     if not os.path.isfile(ass_path):
@@ -636,24 +645,69 @@ def burn_captions(
     if fontsdir:
         fonts_esc = fontsdir.replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
         filt += f":fontsdir='{fonts_esc}'"
+    probe = probe_media(media_path)
+    duration = float(probe.get("video_duration_seconds") or probe.get("duration_seconds") or 0)
+    fps = float(probe.get("fps") or 0) or None
+    used_preset = str(preset or "medium")
+    used_crf = int(crf)
+    used_timeout = encode_timeout_seconds(
+        duration,
+        width=probe.get("width"),
+        height=probe.get("height"),
+        fps=fps,
+        preset=used_preset,
+        override=timeout,
+    )
     from ..render.atomic import run_ffmpeg_atomic
 
-    written = run_ffmpeg_atomic(
+    cmd = [
+        which_ffmpeg("ffmpeg"),
+        "-hide_banner",
+        "-y",
+        "-i",
+        media_path,
+    ]
+    nb_frames = probe.get("nb_frames")
+    if isinstance(nb_frames, int) and nb_frames > 0:
+        cmd.extend(["-frames:v", str(nb_frames)])
+    elif duration > 0:
+        cmd.extend(["-t", f"{duration:.6f}"])
+    cmd.extend(
         [
-            which_ffmpeg("ffmpeg"),
-            "-hide_banner",
-            "-y",
-            "-i",
-            media_path,
             "-vf",
             filt,
-            "-c:a",
-            "copy",
-        ],
+            "-c:v",
+            "libx264",
+            "-preset",
+            used_preset,
+            "-crf",
+            str(used_crf),
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    )
+    if probe.get("has_audio"):
+        cmd.extend(["-c:a", "copy"])
+    else:
+        cmd.extend(["-an"])
+    frame = (1.0 / fps) if fps else 0.05
+    written = run_ffmpeg_atomic(
+        cmd,
         output_path,
-        timeout=300,
+        timeout=used_timeout,
+        verify_kwargs={
+            "expect_audio": bool(probe.get("has_audio")),
+            "expect_duration": duration if duration > 0 else None,
+            # One video frame, but not tighter than an AAC priming packet.
+            "duration_tolerance": max(frame, 0.05),
+            "expect_width": probe.get("width") or None,
+            "expect_height": probe.get("height") or None,
+        },
     )
     if not written.get("ok"):
         return written
     written["ass_path"] = ass_path
+    written["preset"] = used_preset
+    written["crf"] = used_crf
+    written["timeout_seconds"] = used_timeout
     return written

@@ -40,8 +40,8 @@ Pure Python + ffmpeg (no VEGAS):
 - `rushcut check --parity` / `check_parity` — layout SSIM/MAD vs an approved cut (#51)
 - `stitch_session` / `detect_region_presence` / `check_loop` / `check_media`
 - `edit_profile.yaml` safeguard fields (`schema: rushcut.profile/v1`) — full schema remains #17
-- `generate_captions` / `burn_captions` — SRT + ASS (chunking, mask, karaoke) and ffmpeg burn-in
-- File-level `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`
+- `generate_captions` / `burn_captions` — SRT + ASS (chunking, mask, karaoke) and ffmpeg burn-in (timeout/preset/CRF; timeout scaled to program length)
+- File-level `cut_media`, `concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`
 - `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`
 - `master_audio` (two-pass loudnorm + limiter + encode-aware TP)
 - `analyze_noise_floor` / `audio_cleanup`

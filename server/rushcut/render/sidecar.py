@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from ..analysis.ffmpeg_util import decode_timeout_seconds
 from ..analysis.probe import probe_media
 from ..output_policy import check_output_path
 
@@ -44,6 +45,7 @@ def verify_output(
     duration_tolerance: float = 0.6,
     expect_duration: float | None = None,
     decode: bool = True,
+    decode_timeout: float | None = None,
 ) -> dict[str, Any]:
     """ffprobe + optional full-decode QA.
 
@@ -60,7 +62,12 @@ def verify_output(
         moov_ok = False
     decode_errors = 0
     if decode and os.path.isfile(path):
-        decode_errors = count_decode_errors(path)
+        probed_duration = float(
+            probe.get("stream_max_duration_seconds") or probe.get("duration_seconds") or 0
+        )
+        decode_errors = count_decode_errors(
+            path, timeout=decode_timeout_seconds(probed_duration, decode_timeout)
+        )
     elif not os.path.isfile(path):
         decode_errors = 1
     problems: list[str] = []

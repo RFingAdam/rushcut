@@ -10,8 +10,8 @@ import os
 from typing import Any
 
 from ..output_policy import check_output_path, make_work_dir, work_named_tempfile
-from .ffmpeg_util import which_ffmpeg
-from .probe import probe_media
+from .ffmpeg_util import encode_timeout_seconds, which_ffmpeg
+from .probe import probe_media, streams_compatible
 
 
 def _ok_path(path: str, label: str = "path") -> dict[str, Any] | None:
@@ -22,13 +22,19 @@ def _ok_path(path: str, label: str = "path") -> dict[str, Any] | None:
     return None
 
 
-def _ffmpeg_out(cmd: list[str], output_path: str, *, timeout: float = 180) -> dict[str, Any]:
+def _ffmpeg_out(
+    cmd: list[str],
+    output_path: str,
+    *,
+    timeout: float = 180,
+    verify_kwargs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from ..render.atomic import run_ffmpeg_atomic
 
     refused = check_output_path(output_path)
     if refused:
         return refused
-    return run_ffmpeg_atomic(cmd, output_path, timeout=timeout)
+    return run_ffmpeg_atomic(cmd, output_path, timeout=timeout, verify_kwargs=verify_kwargs)
 
 
 def cut_media(
@@ -139,8 +145,19 @@ def cut_media(
     }
 
 
-def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
-    """Concatenate media files in order (re-encodes for mixed codecs)."""
+def concat_media(
+    paths: list[str],
+    output_path: str,
+    timeout: float | None = None,
+    preset: str = "medium",
+    crf: int = 23,
+) -> dict[str, Any]:
+    """Concatenate media files in order.
+
+    Stream-copies when every input shares codec parameters. Otherwise
+    re-encodes with a quality ``preset`` / ``crf`` (default medium/23,
+    not ultrafast). Timeout scales with program length when omitted.
+    """
     if not paths:
         return {"ok": False, "error": "paths is required"}
     files: list[str] = []
@@ -151,6 +168,67 @@ def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
         files.append(os.path.abspath(p))
     if not output_path:
         return {"ok": False, "error": "output_path is required"}
+    probes = [probe_media(p) for p in files]
+    copy = streams_compatible(probes)
+    used_preset = str(preset or "medium")
+    used_crf = int(crf)
+    total_duration = sum(float(p.get("duration_seconds") or 0) for p in probes)
+    first = probes[0] if probes else {}
+    fps = float(first.get("fps") or 0) or None
+    has_audio = any(p.get("has_audio") for p in probes)
+    has_video = any(p.get("has_video") for p in probes)
+    used_timeout = encode_timeout_seconds(
+        total_duration,
+        width=first.get("width"),
+        height=first.get("height"),
+        fps=fps,
+        preset=used_preset,
+        copy=copy,
+        override=timeout,
+    )
+    verify_kwargs = {"expect_audio": has_audio}
+
+    def _concat_cmd(list_path: str, *, stream_copy: bool) -> list[str]:
+        cmd = [
+            which_ffmpeg("ffmpeg"),
+            "-hide_banner",
+            "-y",
+        ]
+        if stream_copy:
+            # Rebuild timestamps so concat-demuxer joins pass a full decode.
+            cmd.extend(["-fflags", "+genpts"])
+        cmd.extend(
+            [
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                list_path,
+            ]
+        )
+        if stream_copy:
+            cmd.extend(["-c", "copy"])
+            return cmd
+        if has_video:
+            cmd.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    used_preset,
+                    "-crf",
+                    str(used_crf),
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+            )
+        if has_audio:
+            cmd.extend(["-c:a", "aac"])
+        elif has_video:
+            cmd.extend(["-an"])
+        return cmd
+
     list_file = work_named_tempfile(".txt")
     try:
         for p in files:
@@ -158,28 +236,30 @@ def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
             list_file.write(f"file '{escaped}'\n")
         list_file.close()
         written = _ffmpeg_out(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-hide_banner",
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                list_file.name,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-            ],
+            _concat_cmd(list_file.name, stream_copy=copy),
             output_path,
-            timeout=300,
+            timeout=used_timeout,
+            verify_kwargs=verify_kwargs,
         )
+        if copy and not written.get("ok"):
+            copy = False
+            used_timeout = encode_timeout_seconds(
+                total_duration,
+                width=first.get("width"),
+                height=first.get("height"),
+                fps=fps,
+                preset=used_preset,
+                copy=False,
+                override=timeout,
+            )
+            written = _ffmpeg_out(
+                _concat_cmd(list_file.name, stream_copy=False),
+                output_path,
+                timeout=used_timeout,
+                verify_kwargs=verify_kwargs,
+            )
+            if written.get("ok"):
+                written["stream_copy_fallback"] = "reencode"
     finally:
         try:
             os.remove(list_file.name)
@@ -188,6 +268,10 @@ def concat_media(paths: list[str], output_path: str) -> dict[str, Any]:
     if not written.get("ok"):
         return written
     written["count"] = len(files)
+    written["stream_copy"] = copy
+    written["preset"] = None if copy else used_preset
+    written["crf"] = None if copy else used_crf
+    written["timeout_seconds"] = used_timeout
     return written
 
 

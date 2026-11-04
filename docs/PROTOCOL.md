@@ -102,8 +102,8 @@ over the RPC names above. See [API_COVERAGE.md](API_COVERAGE.md).
 
 Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
 `analyze_noise_floor`, `transcribe_media`, `check_output`, `check_parity`, `validate_profile`,
-`check_seams`, `snap_cuts`, `check_speed_ramps`, `generate_captions`, `burn_captions`, `cut_media`,
-`concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`,
+`check_seams`, `snap_cuts`, `check_speed_ramps`, `generate_captions`, `burn_captions` (timeout/preset/CRF), `cut_media`,
+`concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`,
 `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`,
 `loop_fades`, `master_audio`, `audio_cleanup`,
 `verify_output`, `export_review_pack`, `fits_cap`. Helpers `apply_crossfade` / `apply_ducking` /
