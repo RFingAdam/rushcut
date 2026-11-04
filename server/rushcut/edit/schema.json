@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RFingAdam/rushcut/edit.schema.json",
+  "title": "Rushcut edit.json",
+  "description": "Declarative multi-segment timeline for apply_timeline.",
+  "type": "object",
+  "required": ["segments"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Document type. Preferred value: rushcut.edit/v1"
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/segment" }
+    },
+    "output": { "$ref": "#/$defs/output" },
+    "join_fade_ms": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 50,
+      "description": "Micro-fade at each segment join in milliseconds (2-20 typical)."
+    },
+    "effects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/effect" },
+      "description": "Global effects applied after all segments are concatenated."
+    }
+  },
+  "$defs": {
+    "output": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "preset": { "type": "string", "enum": ["vertical", "1080p", "4k"] },
+        "width": { "type": "integer", "minimum": 2 },
+        "height": { "type": "integer", "minimum": 2 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "path": { "type": "string" }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": true,
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "in": { "type": "number", "minimum": 0 },
+        "out": { "type": "number", "exclusiveMinimum": 0 },
+        "audio_source": { "type": "string" },
+        "audio_offset": { "type": "number" },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effect" }
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "zoom",
+            "speed_ramp",
+            "lens_zoom",
+            "compose_layout",
+            "blur_regions",
+            "overlay"
+          ]
+        }
+      }
+    }
+  }
+}

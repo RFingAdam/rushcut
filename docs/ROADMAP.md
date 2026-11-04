@@ -48,14 +48,15 @@ Pure Python + ffmpeg (no VEGAS):
 
 Host-backed helpers:
 
-- `apply_crossfade`, `apply_ducking`, `apply_timeline`
+- `apply_crossfade`, `apply_ducking`, `apply_timeline` (edit.json renderer + audio ops)
 - `project.set_video` — output frame size / fps
 
 ## Phase 4 — Render & delivery (complete)
 - Named presets: `vertical` (1080×1920), `1080p`, `4k` via `render_with_preset`
 - `render.start(async=true)` uses documented `Vegas.BeginRender` + `RenderProgress` / `RenderFinished`
 - `render_status` / `wait_for_render` poll from Python (never sit on the UI-marshal wait)
-- `verify_output` (ffprobe + full decode: `moov_ok`, `decode_errors`, `md5`)
+- `verify_output` (ffprobe + full decode: `moov_ok`, `decode_errors`, `md5`, `fps_exact`, `frame_count`, `av_offset_ms`, LUFS/TP, `head_black_s`)
+- `pick_frame` / `compose_thumbnail` / `frame_check`
 - Atomic render: `<name>.partial.mp4` + `+faststart`, rename only after QA, `<name>.qa.json`
 - Output-root policy: `RUSHCUT_OUTPUT_ROOTS` / `output_roots` (work roots for scratch)
 - Sidecar `<output>.edit.json`: length, hook start, caption style, zoom count, music, template

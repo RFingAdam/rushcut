@@ -135,6 +135,13 @@ class QualitySettings(BaseModel):
         return _coerce_mode(value)
 
 
+class ReviewSettings(BaseModel):
+    """Where post-render frame sheets land."""
+
+    model_config = ConfigDict(extra="allow")
+    frame_check_dir: str | None = None
+
+
 class ShortsSettings(BaseModel):
     """YouTube Shorts delivery: hard duration cap and seamless-loop checks."""
 
@@ -166,6 +173,8 @@ class EditProfile(BaseModel):
     sources: list[SourceItem] = Field(default_factory=list)
     quality: QualitySettings = Field(default_factory=QualitySettings)
     shorts: ShortsSettings | None = None
+    review: ReviewSettings = Field(default_factory=ReviewSettings)
+    frame_check_dir: str | None = None
     output_roots: list[str] = Field(default_factory=list)
     work_roots: list[str] = Field(default_factory=list)
 

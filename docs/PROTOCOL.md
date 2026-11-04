@@ -105,10 +105,12 @@ Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
 `check_seams`, `snap_cuts`, `check_speed_ramps`, `generate_captions`, `burn_captions` (timeout/preset/CRF), `cut_media`,
 `concat_media` (stream-copy when codecs match), `reframe_media`, `mix_audio`, `normalize_audio`,
 `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`,
-`loop_fades`, `master_audio`, `audio_cleanup`,
+`loop_fades`, `master_audio`, `audio_cleanup`, `blur_media`, `compose_layout`,
+`track_circle`, `make_text_card`, `pick_frame`, `compose_thumbnail`, `frame_check`,
 `verify_output`, `export_review_pack`, `fits_cap`. Helpers `apply_crossfade` / `apply_ducking` /
-`apply_timeline` / `render_with_preset` compose the RPCs above. The FFmpeg
-backend implements the same RPC names and encodes on `render.start`.
+`apply_timeline` / `render_with_preset` compose the RPCs above. `apply_timeline`
+also renders an `edit.json` timeline (schema in [EDIT_JSON.md](EDIT_JSON.md)).
+The FFmpeg backend implements the same RPC names and encodes on `render.start`.
 
 ## Threading
 

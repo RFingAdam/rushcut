@@ -27,6 +27,8 @@ edits.
    Pass `must_include: [{t, pre, post, id}]` so required events stay on
    the cut timeline.
 4. `cut_media` / `concat_media` / `reframe_media` for file-level jobs, **or**
+   `apply_timeline(edit_json, output)` for a multi-segment edit.json
+   (J/L cuts, zoom, speed ramps, layouts, overlays — see docs/EDIT_JSON.md), **or**
    build a timeline:
    - `new_project` or `open_project`
    - `set_project_video` if the frame size should change
@@ -41,7 +43,9 @@ edits.
    Encodes write `<name>.partial.mp4` and rename only after a full-decode
    QA. Honor `RUSHCUT_OUTPUT_ROOTS` / profile `output_roots` — never
    render to `C:` when a D: edit root is configured.
-6. `verify_output` on the file (`moov_ok`, `decode_errors`, `md5`), then
+6. `verify_output` on the file (`moov_ok`, `decode_errors`, `md5`, `fps_exact`,
+   LUFS, `head_black_s`). `frame_check` writes labelled frames + a sheet.
+   Then
    `check_output` (or `rushcut check`)
    with the profile, transcript, and cut list. Speech-boundary, required
    features, and source-preference failures are not silent.
