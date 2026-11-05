@@ -233,3 +233,35 @@ def test_check_parity_refuses_json_outside_the_roots(monkeypatch, tmp_path):
     assert result["error"] == OUTSIDE_ROOTS
     assert result["id"] == "parity"
     assert not outside.exists()
+
+
+def test_a_path_is_checked_as_written_and_only_roots_are_expanded(monkeypatch, tmp_path):
+    from rushcut.analysis.transcript import analyze_transcript
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    media = allowed / "in.wav"
+    media.write_bytes(b"")
+    monkeypatch.setenv("CLIPS", str(allowed))
+    monkeypatch.setenv("RUSHCUT_OUTPUT_ROOTS", "$CLIPS")
+    monkeypatch.chdir(tmp_path)
+    reset_policy_state()
+    # A root may name a variable, and is expanded.
+    assert check_output_path(str(allowed / "x.json")) is None
+    # A path naming one is not: open() would write ./$CLIPS/x.json under the cwd.
+    for written_as in ("$CLIPS/x.json", "${CLIPS}/x.json", "~/x.json"):
+        assert check_output_path(written_as)["error"] == OUTSIDE_ROOTS, written_as
+    result = analyze_transcript(str(media), json_path="$CLIPS/t.json")
+    assert result["error"] == OUTSIDE_ROOTS
+    assert not (tmp_path / "$CLIPS").exists()
+
+
+def test_a_work_root_under_home_is_expanded_for_scratch(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RUSHCUT_OUTPUT_ROOTS", "~/out")
+    monkeypatch.setenv("RUSHCUT_WORK_ROOTS", "~/work")
+    monkeypatch.chdir(tmp_path)
+    reset_policy_state()
+    scratch = Path(make_work_dir("rushcut-"))
+    assert scratch.is_relative_to(tmp_path / "home" / "work")
+    assert not (tmp_path / "~").exists()

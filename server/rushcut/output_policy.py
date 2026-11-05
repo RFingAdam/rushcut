@@ -126,11 +126,23 @@ def _win_norm(path: str) -> str:
     return "\\".join(stack)
 
 
+def _expand_root(root: str) -> str:
+    """A configured root may start with ``~`` or name environment variables."""
+    return os.path.expandvars(os.path.expanduser(str(root)))
+
+
 def resolve_policy_path(path: str) -> str:
-    """Lexical + realpath resolution used by the write policy."""
+    """Lexical + realpath resolution used by the write policy.
+
+    The path is taken as written. ``open()`` expands neither ``~`` nor
+    ``$VAR``, so expanding them here would approve one file and let the tool
+    write another: ``$RUSHCUT_OUTPUT_ROOTS/x`` would pass as a file under the
+    root and be written under the working directory. Only roots are expanded,
+    by :func:`_expand_root`.
+    """
     if not path:
         return ""
-    raw = os.path.expandvars(os.path.expanduser(str(path)))
+    raw = str(path)
     if _is_windows_style(raw):
         return _win_norm(raw)
     # realpath and not abspath first: abspath folds "link/.." into the directory
@@ -145,6 +157,7 @@ def _casefold_win(path: str) -> str:
 
 
 def is_under_root(path: str, root: str) -> bool:
+    root = _expand_root(root)
     resolved = resolve_policy_path(path)
     resolved_root = resolve_policy_path(root)
     if not resolved or not resolved_root:
@@ -250,7 +263,7 @@ def work_parent() -> str | None:
     if not roots:
         _warn_unrestricted()
         return None
-    root = roots[0]
+    root = _expand_root(roots[0])
     if _is_windows_style(root) and os.name != "nt":
         # Lexical Windows root on POSIX: callers that need a real directory
         # should pass a POSIX work root in tests. Still report the policy root.
@@ -296,7 +309,7 @@ def scan_stale_partials(roots: Iterable[str] | None = None) -> list[str]:
     policy = current_policy()
     search = list(roots) if roots is not None else list(policy.effective_work_roots)
     found: list[str] = []
-    for root in search:
+    for root in map(_expand_root, search):
         if _is_windows_style(root) and os.name != "nt":
             continue
         if not os.path.isdir(root):
