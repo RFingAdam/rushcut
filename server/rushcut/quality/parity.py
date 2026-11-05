@@ -14,6 +14,7 @@ from typing import Any
 
 from ..analysis.ffmpeg_util import FfmpegError, run, which_ffmpeg
 from ..analysis.probe import probe_media
+from ..output_policy import check_output_path
 
 DEFAULT_SAMPLES = 24
 MIN_SAMPLES = 20
@@ -592,6 +593,10 @@ def check_parity(
         return {"ok": False, "id": "parity", "error": f"file not found: {approved}"}
     if not os.path.isfile(candidate):
         return {"ok": False, "id": "parity", "error": f"file not found: {candidate}"}
+    dest = str(Path(json_path).expanduser().resolve()) if json_path else None
+    refused = check_output_path(dest)
+    if refused:
+        return {**refused, "id": "parity"}
     try:
         edits = _as_edit_regions(edit_regions)
         named = _as_regions(regions)
@@ -846,8 +851,7 @@ def check_parity(
         "per_sample": per_sample,
         **extras,
     }
-    if json_path:
-        dest = str(Path(json_path).expanduser().resolve())
+    if dest:
         result["json_path"] = dest
         _write_json(result, dest)
     return result

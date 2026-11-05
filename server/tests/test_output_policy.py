@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from rushcut.cli import main as cli_main
 from rushcut.output_policy import (
@@ -172,3 +175,61 @@ def test_stale_partials_are_reported_not_deleted(tmp_path, caplog):
 def test_resolve_policy_path_collapses_dotdot():
     assert resolve_policy_path(r"D:\Media\Shows\..\Windows\s.mp4") == r"D:\Media\Windows\s.mp4"
     assert resolve_policy_path(r"\\nas\edits\sub\..\file.mp4") == r"\\nas\edits\file.mp4"
+
+
+def test_dotdot_after_a_symlink_climbs_from_where_the_link_points(tmp_path):
+    allowed = tmp_path / "allowed"
+    target = tmp_path / "elsewhere" / "deep"
+    allowed.mkdir()
+    target.mkdir(parents=True)
+    (allowed / "hop").symlink_to(target, target_is_directory=True)
+    sneaky = os.path.join(str(allowed), "hop", "..", "x.json")
+    # What the OS does with it: ".." leaves the link's target, not the link.
+    Path(sneaky).write_text("{}")
+    landed = (tmp_path / "elsewhere" / "x.json").resolve()
+    assert landed.exists()
+    assert not (allowed / "x.json").exists()
+    assert resolve_policy_path(sneaky) == str(landed)
+    assert not is_under_root(sneaky, str(allowed))
+
+
+def _outside_roots(monkeypatch, tmp_path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("RUSHCUT_OUTPUT_ROOTS", str(allowed))
+    reset_policy_state()
+    return allowed, tmp_path / "outside"
+
+
+def test_transcribe_refuses_a_transcript_or_cache_outside_the_roots(monkeypatch, tmp_path):
+    from rushcut.analysis.transcript import analyze_transcript
+
+    allowed, outside = _outside_roots(monkeypatch, tmp_path)
+    media = allowed / "in.wav"
+    media.write_bytes(b"")
+    for kwargs in (
+        {"json_path": str(outside / "t.json")},
+        {"run_dir": str(outside)},
+        {"json_path": str(allowed / "t.json"), "run_dir": str(outside)},
+        {"cache_dir": str(outside)},
+    ):
+        result = analyze_transcript(str(media), **kwargs)
+        assert result["ok"] is False, (kwargs, result)
+        assert result["error"] == OUTSIDE_ROOTS, (kwargs, result)
+    assert not outside.exists()
+    assert not (allowed / "t.json").exists()
+
+
+def test_check_parity_refuses_json_outside_the_roots(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")
+    from rushcut.quality.parity import check_parity
+
+    allowed, outside = _outside_roots(monkeypatch, tmp_path)
+    approved, candidate = allowed / "a.mp4", allowed / "b.mp4"
+    approved.write_bytes(b"")
+    candidate.write_bytes(b"")
+    result = check_parity(str(approved), str(candidate), json_path=str(outside / "parity.json"))
+    assert result["ok"] is False
+    assert result["error"] == OUTSIDE_ROOTS
+    assert result["id"] == "parity"
+    assert not outside.exists()

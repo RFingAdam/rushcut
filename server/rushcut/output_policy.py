@@ -133,22 +133,11 @@ def resolve_policy_path(path: str) -> str:
     raw = os.path.expandvars(os.path.expanduser(str(path)))
     if _is_windows_style(raw):
         return _win_norm(raw)
-    abs_path = os.path.abspath(raw)
-    parent = abs_path
-    # Walk up to the first existing ancestor so junctions/symlinks that
-    # already exist are resolved, while a not-yet-created leaf stays put.
-    while parent and not os.path.lexists(parent):
-        nxt = os.path.dirname(parent)
-        if nxt == parent:
-            break
-        parent = nxt
-    if parent and os.path.lexists(parent):
-        real_parent = os.path.realpath(parent)
-        tail = os.path.relpath(abs_path, parent)
-        if tail in (".", ""):
-            return os.path.normpath(real_parent)
-        return os.path.normpath(os.path.join(real_parent, tail))
-    return os.path.normpath(abs_path)
+    # realpath and not abspath first: abspath folds "link/.." into the directory
+    # holding the link, while the OS climbs from wherever the link points.
+    # realpath resolves each existing component before the ".." after it, and
+    # keeps a not-yet-created tail as written.
+    return os.path.realpath(os.path.join(os.getcwd(), raw))
 
 
 def _casefold_win(path: str) -> str:
