@@ -126,29 +126,30 @@ def _win_norm(path: str) -> str:
     return "\\".join(stack)
 
 
+def _expand_root(root: str) -> str:
+    """A configured root may start with ``~`` or name environment variables."""
+    return os.path.expandvars(os.path.expanduser(str(root)))
+
+
 def resolve_policy_path(path: str) -> str:
-    """Lexical + realpath resolution used by the write policy."""
+    """Lexical + realpath resolution used by the write policy.
+
+    The path is taken as written. ``open()`` expands neither ``~`` nor
+    ``$VAR``, so expanding them here would approve one file and let the tool
+    write another: ``$RUSHCUT_OUTPUT_ROOTS/x`` would pass as a file under the
+    root and be written under the working directory. Only roots are expanded,
+    by :func:`_expand_root`.
+    """
     if not path:
         return ""
-    raw = os.path.expandvars(os.path.expanduser(str(path)))
+    raw = str(path)
     if _is_windows_style(raw):
         return _win_norm(raw)
-    abs_path = os.path.abspath(raw)
-    parent = abs_path
-    # Walk up to the first existing ancestor so junctions/symlinks that
-    # already exist are resolved, while a not-yet-created leaf stays put.
-    while parent and not os.path.lexists(parent):
-        nxt = os.path.dirname(parent)
-        if nxt == parent:
-            break
-        parent = nxt
-    if parent and os.path.lexists(parent):
-        real_parent = os.path.realpath(parent)
-        tail = os.path.relpath(abs_path, parent)
-        if tail in (".", ""):
-            return os.path.normpath(real_parent)
-        return os.path.normpath(os.path.join(real_parent, tail))
-    return os.path.normpath(abs_path)
+    # realpath and not abspath first: abspath folds "link/.." into the directory
+    # holding the link, while the OS climbs from wherever the link points.
+    # realpath resolves each existing component before the ".." after it, and
+    # keeps a not-yet-created tail as written.
+    return os.path.realpath(os.path.join(os.getcwd(), raw))
 
 
 def _casefold_win(path: str) -> str:
@@ -156,6 +157,7 @@ def _casefold_win(path: str) -> str:
 
 
 def is_under_root(path: str, root: str) -> bool:
+    root = _expand_root(root)
     resolved = resolve_policy_path(path)
     resolved_root = resolve_policy_path(root)
     if not resolved or not resolved_root:
@@ -261,7 +263,7 @@ def work_parent() -> str | None:
     if not roots:
         _warn_unrestricted()
         return None
-    root = roots[0]
+    root = _expand_root(roots[0])
     if _is_windows_style(root) and os.name != "nt":
         # Lexical Windows root on POSIX: callers that need a real directory
         # should pass a POSIX work root in tests. Still report the policy root.
@@ -307,7 +309,7 @@ def scan_stale_partials(roots: Iterable[str] | None = None) -> list[str]:
     policy = current_policy()
     search = list(roots) if roots is not None else list(policy.effective_work_roots)
     found: list[str] = []
-    for root in search:
+    for root in map(_expand_root, search):
         if _is_windows_style(root) and os.name != "nt":
             continue
         if not os.path.isdir(root):
