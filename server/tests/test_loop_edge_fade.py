@@ -210,8 +210,10 @@ def test_n1103_pattern_flat_head_then_onset_is_not_a_forced_fade(tmp_path, ffmpe
 
 def test_real_0_11s_afade_at_the_head_still_fails(tmp_path, ffmpeg_bin):
     """s2_04 render_v2 stand-in: ffmpeg afade 0.11 s from silence."""
+    # Sine, not anoisesrc: a 0.11 s linear fade's 3 dB point sits on 0.08 s,
+    # and white-noise 2 ms RMS jittered it onto the limit (0.08, pass=True).
     filt = (
-        f"anoisesrc=d=1:c=white:r={_SR}:a={_STEADY_AMP},"
+        f"sine=frequency=440:sample_rate={_SR}:duration=1,volume=0.3,"
         f"afade=t=in:st=0:d=0.11"
     )
     dest = _mp4(ffmpeg_bin, tmp_path / "afade011.mp4", filt, 1.0)
