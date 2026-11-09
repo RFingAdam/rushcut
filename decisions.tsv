@@ -6,3 +6,4 @@ ts	phase	decision	why	evidence	result
 2026-11-04T14:28:00Z	prove	make verify passes on this branch (main + verify)	Need a green baseline before the broken-change proof	make verify → 273 passed, smoke duration=0.800s, VERIFY PASSED, 285s	pass
 2026-11-04T14:29:00Z	prove	Deliberate unused import fails lint by name, then revert	Verify must fail fast with VERIFY FAILED: lint	unused_deliberate_break → F401 + VERIFY FAILED: lint; reverted	pass
 2026-11-04T14:30:00Z	prove	Deliberate 9s expected duration fails smoke, then revert	Smoke must reject a bad artifact, not only unit tests	EXPECTED_SECONDS=9.0 → apply exit 1, VERIFY FAILED: smoke — exit code; reverted	pass
+2026-11-09T18:32:04Z	start	Fix check-loop edge-fade false positive on later onsets (#60)	n1103_a v3 flat head RMS ~-20 dBFS is scored fade_in 0.302s because body is max of 0.175-0.35s	main@16f1fdb _edge_fade_seconds uses max of far half; open PRs #59 output-policy and #2 pypi do not touch loop.py	pending
