@@ -299,8 +299,10 @@ def test_two_ms_of_trailing_encoder_padding_is_not_a_forced_fade_out(tmp_path, f
 
 def test_s2_04_afade_in_0_11_out_0_19_still_fails(tmp_path, ffmpeg_bin):
     """s2_04 render_v2 stand-in: real 0.110 / 0.190 s afade must still fail."""
+    # Sine, not anoisesrc: white noise RMS in the 2 ms frames jittered a 0.11 s
+    # fade across the 0.08 s limit (0.076 vs 0.092). A tone is stable at 0.082 / 0.142.
     filt = (
-        f"anoisesrc=d=1:c=white:r={_SR}:a={_STEADY_AMP},"
+        f"sine=frequency=440:sample_rate={_SR}:duration=1,volume=0.3,"
         "afade=t=in:st=0:d=0.11,"
         "afade=t=out:st=0.81:d=0.19"
     )
