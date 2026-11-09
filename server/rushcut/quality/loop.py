@@ -24,6 +24,8 @@ _NEAR_SILENCE_DBFS = -40.0
 _MIN_RAMP_SECONDS = 0.030
 _RAMP_MIN_RISE_DB = 8.0
 _RAMP_STEP_TOLERANCE_DB = 1.5
+# AAC encode/decode leaves a couple of ms just under the silence floor.
+_ENCODER_PRIMING_SECONDS = 0.010
 _SSIM_RE = re.compile(r"All:(\d+(?:\.\d+)?)")
 _PSNR_RE = re.compile(r"average:(\d+(?:\.\d+)?)", re.IGNORECASE)
 
@@ -184,10 +186,23 @@ def _is_silence_edge_fade(
     ``loop_fades`` / ``afade`` start near digital silence. A later speech
     or gunfire peak inside the 0.35 s window is not a forced fade: the
     seam is already at program level.
+
+    AAC encoder priming / decoder padding is a couple of milliseconds
+    just under the silence floor, then program audio. That is not a
+    fade. Skip a leading (or trailing, once reversed) silent run
+    shorter than ``_ENCODER_PRIMING_SECONDS`` before deciding.
     """
     if not levels_db:
         return False
     edge = list(levels_db) if from_start else list(reversed(levels_db))
+    if frame_seconds > 0:
+        silent_n = 0
+        while silent_n < len(edge) and edge[silent_n] <= _SILENCE_DBFS:
+            silent_n += 1
+        if 0 < silent_n < len(edge) and silent_n * frame_seconds < _ENCODER_PRIMING_SECONDS:
+            edge = edge[silent_n:]
+    if not edge:
+        return False
     if edge[0] <= _SILENCE_DBFS:
         return True
     if frame_seconds <= 0:
