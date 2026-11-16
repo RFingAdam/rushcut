@@ -18,7 +18,8 @@ edits.
    files by gap, remuxes unfinalized MKVs, and returns an offset map.
    `cut_media` / `transcribe_media` / `detect_region_presence` accept
    session time via `offset_map` + `session_start` / `session_seconds`.
-2. Optional: `detect_scenes`, `analyze_audio`, `transcribe_media`
+2. Optional: `detect_scenes`, `analyze_audio`, `score_hook(path, window_s=3)`
+   (motion, loudness rise, first-second speech, card/face, 0-1 score), `transcribe_media`
    (chunked/cached word timestamps; optional `diarize`, mic/mix
    `attribute_speakers`, or injected speaker `turns`).
    `repair_media` remuxes an unfinalized MKV without touching the source.

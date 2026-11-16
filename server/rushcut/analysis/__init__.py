@@ -13,6 +13,7 @@ from .audio_ops import (
 from .captions import burn_captions, chunk_words, generate_captions
 from .cleanup import analyze_noise_floor, audio_cleanup
 from .edit_ops import concat_media, cut_media, mix_audio, normalize_audio, reframe_media
+from .hook import score_hook
 from .loudness import master_audio, measure_loudness
 from .pacing import measure_pacing, pacing_from_words
 from .probe import file_still_writing, probe_media
@@ -53,6 +54,7 @@ __all__ = [
     "reframe_media",
     "repair_media",
     "replace_audio_span",
+    "score_hook",
     "speech_spans_from_words",
     "stitch_session",
     "transcribe_media",

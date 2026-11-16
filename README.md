@@ -30,7 +30,7 @@ editors.
   (C# host over loopback TCP) or DaVinci Resolve Studio (official scripting
   API), and read the timeline back after every change.
 - **Inspect, edit, verify.** Grounding tools (`probe_media`, `detect_scenes`,
-  `analyze_audio`, optional local Whisper with word timestamps) and render
+  `analyze_audio`, `score_hook`, optional local Whisper with word timestamps) and render
   checks (`verify_output`, `rushcut check`) let the model check its own work.
 
 > **Formerly vegas-director-mcp.** Old import names, `python -m` entry
@@ -162,7 +162,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-100 tools, generated from the server's registered tool list. Tool names are
+102 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -177,7 +177,7 @@ reason instead of raising.
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (11) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack`, `pick_frame`, `compose_thumbnail`, `frame_check` |
-| Analysis, no NLE needed (11) | `probe_media`, `detect_scenes`, `analyze_audio`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers` |
+| Analysis, no NLE needed (12) | `probe_media`, `detect_scenes`, `analyze_audio`, `score_hook`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers` |
 | Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |

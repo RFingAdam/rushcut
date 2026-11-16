@@ -358,6 +358,14 @@ def analyze_audio(path: str, spike_ratio: float = 2.2, max_spikes: int = 40) -> 
 
 
 @mcp.tool()
+def score_hook(path: str, window_s: float = 3.0) -> dict:
+    """Score the opening window of a clip: motion, loudness rise, first-second speech, card, face, 0-1 hook score. No NLE."""
+    from .analysis.hook import score_hook as _score
+
+    return _score(path, window_s=window_s)
+
+
+@mcp.tool()
 def transcribe_media(
     path: str | None = None,
     model_size: str = "base",
