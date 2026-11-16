@@ -17,7 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Rushcut CLI. Quality checks: `rushcut check` "
             "(layout parity: `rushcut check --parity APPROVED CANDIDATE`). "
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
-            "`check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
+            "`score-hook`, `check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
             "`plan-story-edit`, `measure-pacing`, `fits-cap`. "
             "Review: `export-review-pack`. Render: `rushcut apply edit.json -o out.mp4`. "
             "The MCP server is `rushcut-mcp` (or python -m rushcut with no args)."
@@ -223,6 +223,13 @@ def _build_parser() -> argparse.ArgumentParser:
     region.add_argument("--start", type=float, default=None, dest="start_seconds")
     region.add_argument("--end", type=float, default=None, dest="end_seconds")
     region.add_argument("--json", action="store_true", dest="as_json")
+
+    hook = sub.add_parser(
+        "score-hook",
+        help="Score the opening window of a clip for hook strength",
+    )
+    hook.add_argument("path")
+    hook.add_argument("--window", type=float, default=3.0, dest="window_s")
 
     formats = sub.add_parser("list-story-formats", help="List shipped long-form story formats")
     formats.add_argument("--summary", action="store_true")
@@ -552,6 +559,14 @@ def _cmd_region(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 2
 
 
+def _cmd_score_hook(args: argparse.Namespace) -> int:
+    from .analysis.hook import score_hook
+
+    result = score_hook(args.path, window_s=args.window_s)
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
 def _cmd_list_formats(args: argparse.Namespace) -> int:
     from .formats import list_story_formats
 
@@ -651,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
         "plan-story-edit": _cmd_plan,
         "profile": _cmd_profile,
         "repair-media": _cmd_repair,
+        "score-hook": _cmd_score_hook,
         "snap-cuts": _cmd_snap_cuts,
         "stitch-session": _cmd_stitch,
     }
