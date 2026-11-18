@@ -1,0 +1,39 @@
+Rushcut MCP (formerly vegas-director-mcp)
+Copyright (c) 2026 RFingAdam
+
+Licensed under the GNU Affero General Public License, version 3 or (at your
+option) any later version (SPDX: AGPL-3.0-or-later). See LICENSE.
+
+Versions published before 2026-11-02 were released under the MIT License.
+Copies obtained under those terms may continue to be used under them. Anything
+published from 2026-11-02 on is AGPL-3.0-or-later.
+
+Additional permission under section 7 of the GNU AGPL: the sources in host/
+are written to run inside MAGIX VEGAS Pro, a proprietary program, and call its
+ScriptPortal.Vegas scripting interface. You may run and convey those sources
+together with VEGAS Pro and that interface, and the interface is not treated
+as part of the covered work. This permission covers only that interface; all
+other AGPL terms apply.
+
+Portions of this project's initial architecture were informed by
+MarcoRavich/VEGAS-AI-control (https://github.com/MarcoRavich/VEGAS-AI-control),
+released under CC0-1.0 (public domain dedication). No code from that
+repository is reused verbatim; its README/API-mapping table served as a
+starting reference point only. Credit given voluntarily, not required by
+CC0-1.0.
+
+This project is an independent, unofficial tool. It is not affiliated with,
+endorsed by, sponsored by, or supported by MAGIX Software GmbH or any MAGIX
+company. VEGAS, VEGAS Pro, and MAGIX are trademarks of their respective owners.
+
+This repository does not redistribute MAGIX binaries, installers, or the
+VEGAS scripting assemblies. The host script calls ScriptPortal.Vegas only
+inside a locally licensed VEGAS Pro install.
+
+The optional DaVinci Resolve backend uses Blackmagic's official scripting
+module (`DaVinciResolveScript` / fusionscript) inside a locally installed
+Resolve. It is not affiliated with, endorsed by, or supported by
+Blackmagic Design. DaVinci Resolve and Fusion are trademarks of
+Blackmagic Design Pty Ltd. This repository does not redistribute Resolve
+binaries. Live scripting requires Resolve Studio; the free edition has
+had no Scripting API since version 21.1.
