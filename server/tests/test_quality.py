@@ -229,3 +229,20 @@ def test_check_output_mcp_shape():
     )
     assert "checks" in result
     assert result["ok"] is False
+
+
+def test_python_m_rushcut_dispatches_subcommands_to_cli(tmp_path):
+    """`python -m rushcut check-loop` must reach the CLI, not start the MCP server."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "rushcut", "check-loop", str(tmp_path / "missing.mp4")],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert "Starting MCP server" not in proc.stderr + proc.stdout
+    assert "not found" in proc.stdout + proc.stderr
