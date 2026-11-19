@@ -314,3 +314,52 @@ def test_cli_check_must_include_and_media_flags(tmp_path):
     )
     code = cli_main(["check", "--cuts", str(cuts), "--must-include", str(events)])
     assert code == 2
+
+
+def test_check_loop_audio_only_file_checks_audio(tmp_path, ffmpeg_bin):
+    dest = tmp_path / "tone.m4a"
+    _ffmpeg(
+        [
+            ffmpeg_bin, "-y", "-f", "lavfi",
+            "-i", "sine=frequency=440:sample_rate=48000:duration=1.5",
+            "-c:a", "aac", str(dest),
+        ]
+    )
+    result = check_loop(str(dest), audio_jump_db=6.0)
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["skipped_checks"] == ["video"]
+    assert result["pass"] is True
+
+
+def test_check_loop_video_only_file_checks_video(tmp_path, ffmpeg_bin):
+    dest = tmp_path / "silent.mp4"
+    _ffmpeg(
+        [
+            ffmpeg_bin, "-y", "-f", "lavfi",
+            "-i", "color=c=red:s=160x90:r=24:d=1.5",
+            "-pix_fmt", "yuv420p", "-c:v", "libx264", str(dest),
+        ]
+    )
+    result = check_loop(str(dest), ssim_min=0.85)
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["skipped_checks"] == ["audio"]
+    assert result["pass"] is True
+
+
+def test_check_loop_file_with_no_streams_fails(tmp_path, monkeypatch):
+    from rushcut.quality import loop
+
+    dest = tmp_path / "empty.mp4"
+    dest.write_bytes(b"\x00" * 16)
+    monkeypatch.setattr(
+        loop,
+        "probe_media",
+        lambda path, *a, **k: {"ok": True, "has_video": False, "has_audio": False},
+    )
+    result = check_loop(str(dest))
+    assert result["pass"] is False
+    assert result["skipped"] is True
+    assert result["skipped_checks"] == ["video", "audio"]
+    assert "no video or audio" in result["detail"]

@@ -537,12 +537,20 @@ def check_loop(
     last_db = audio.get("audio_last_db")
     video_ok = bool(video.get("skipped") or video.get("pass"))
     audio_ok = bool(audio.get("skipped") or audio.get("pass"))
-    passed = video_ok and audio_ok
+    skipped = [
+        name for name, sub in (("video", video), ("audio", audio)) if sub.get("skipped")
+    ]
+    nothing_checked = len(skipped) == 2
+    passed = video_ok and audio_ok and not nothing_checked
     detail_parts = [p for p in (video.get("detail"), audio.get("detail")) if p]
+    if nothing_checked:
+        detail_parts.append("no video or audio stream was checked")
     return {
         "ok": True,
         "id": "loop_seam",
         "pass": passed,
+        "skipped": nothing_checked,
+        "skipped_checks": skipped,
         "mode": str(mode).lower(),
         "ssim": ssim,
         "ssim_min": float(ssim_min),

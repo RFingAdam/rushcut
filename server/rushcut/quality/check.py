@@ -166,6 +166,8 @@ def run_checks(
             profile_error = str(exc)
 
     target_path = Path(target) if target else None
+    if target_path is not None and not target_path.exists():
+        raise ValueError(f"target not found: {target}")
     run_info: dict[str, Any] | None = None
     if target_path and target_path.is_dir():
         run_info = _discover_run_dir(str(target_path))
@@ -482,6 +484,10 @@ def run_checks(
     warnings = [c for c in checks if c.get("warned") or c.get("severity") == "warning"]
     passed = not failures
     ok = passed if gate != "off" else True
+    error = None
+    if not checks:
+        error = "no checks ran: pass a target, or inputs such as --transcript/--cuts/--edit"
+        passed = ok = False
     result = {
         "ok": ok,
         "passed": passed,
@@ -492,6 +498,8 @@ def run_checks(
         "warnings": warnings,
         "target": os.path.abspath(target) if target else None,
     }
+    if error:
+        result["error"] = error
     report_dest = None
     if run_info and run_info.get("dir"):
         report_dest = Path(run_info["dir"]) / "report.json"
@@ -556,6 +564,8 @@ def write_report(result: dict[str, Any], dest: str | os.PathLike[str] | None = N
 def format_report(result: dict[str, Any]) -> str:
     status = "PASS" if result.get("ok") else "FAIL"
     lines = [f"rushcut check: {status} (gate={result.get('gate')})"]
+    if result.get("error"):
+        lines.append(f"  error: {result['error']}")
     for check in result.get("checks") or []:
         cid = check.get("id")
         if check.get("skipped") and check.get("pass"):

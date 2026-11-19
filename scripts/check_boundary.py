@@ -30,12 +30,30 @@ BLOCKED_TERM_HASHES = {
     "e520cdec7d2383a4aaffca8958b8fd8e2f4444f477b533d404de92db1cdf5399",
 }
 
+# Personal drive paths. A path under a drive root whose first folder is a
+# person's name (hashed, like the terms above), or under Users\<name> with a
+# real-looking account name, belongs to one machine and must not be published.
+PERSONAL_DIR_HASHES = {
+    "f7f376a1fcd0d0e11a10ed1b6577c99784d3a6bbe669b1d13fae43eb64634f6e",
+}
+GENERIC_USER_DIRS = {"public", "default", "user", "username", "you", "name", "me", "example"}
+DRIVE_PATH = re.compile(r"\b[a-z]:(?:\\{1,2}|/)([^\\/\s'\"`<>:]+)(?:(?:\\{1,2}|/)([^\\/\s'\"`<>:]+))?")
 TOKEN = re.compile(r"[a-z0-9_]+")
 SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".ico", ".gif", ".webp", ".dll", ".zip", ".ttf"}
 
 
 def term_hash(word: str) -> str:
     return hashlib.sha256(word.strip().lower().encode("utf-8")).hexdigest()
+
+
+def personal_drive_path(line: str) -> bool:
+    for match in DRIVE_PATH.finditer(line):
+        first, second = match.group(1), match.group(2)
+        if term_hash(first) in PERSONAL_DIR_HASHES:
+            return True
+        if first == "users" and second and second not in GENERIC_USER_DIRS:
+            return True
+    return False
 
 
 def tracked_files() -> list[str]:
@@ -57,6 +75,8 @@ def scan(paths: list[str]) -> list[str]:
         except OSError:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
+            if personal_drive_path(line):
+                problems.append(f"{rel}:{lineno}: personal drive path")
             for token in TOKEN.findall(line):
                 if term_hash(token) in BLOCKED_TERM_HASHES:
                     problems.append(f"{rel}:{lineno}: blocked term")
