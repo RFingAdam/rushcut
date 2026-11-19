@@ -3,9 +3,9 @@
 schema: rushcut.profile/v1
 id: windows-edits
 output_roots:
-  - 'D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS'
+  - 'D:\Media\Edits'
 work_roots:
-  - 'D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS'
+  - 'D:\Media\Edits'
 required_features:
   - captions
   - loudness_normalize

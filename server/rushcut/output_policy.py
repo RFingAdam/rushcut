@@ -29,9 +29,7 @@ OUTSIDE_ROOTS = "output outside allowed roots"
 
 # Documented Windows example default. Configurable via env / profile;
 # not the only root the library will accept.
-EXAMPLE_WINDOWS_OUTPUT_ROOT = (
-    r"D:\Adam\Videos\ShadowPlay Videos\Microsoft Flight Simulator\OBS\_EDITS"
-)
+EXAMPLE_WINDOWS_OUTPUT_ROOT = r"D:\Media\Edits"
 
 _ENV_OUTPUT = "RUSHCUT_OUTPUT_ROOTS"
 _ENV_WORK = "RUSHCUT_WORK_ROOTS"
