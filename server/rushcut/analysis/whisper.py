@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Callable
 from typing import Any
 
+from ..output_policy import check_output_path
 from .ffmpeg_util import FfmpegError, run, which_ffmpeg
 from .probe import attach_container_warnings, probe_media
 
@@ -493,6 +494,17 @@ def transcribe_media(
     if not os.path.isfile(path):
         return {"ok": False, "error": f"file not found: {path}"}
 
+    # Everything this call can write, checked before any work: the transcript,
+    # and the cache, which lives in cache_dir, else in run_dir.
+    transcript_dest = json_path or (os.path.join(str(run_dir), "transcript.json") if run_dir else None)
+    writes: list[tuple[str | None, str]] = [(transcript_dest, "output")]
+    if not no_cache:
+        writes.append((cache_dir, "work") if cache_dir else (run_dir, "output"))
+    for target, kind in writes:
+        refused = check_output_path(target, kind=kind)
+        if refused:
+            return refused
+
     prompt = initial_prompt
     if lexicon:
         extra = " ".join(str(w).strip() for w in lexicon if str(w).strip())
@@ -530,9 +542,8 @@ def transcribe_media(
         hit = _read_cache(cache_root, cache_key)
         if hit:
             hit["path"] = os.path.abspath(path)
-            if json_path or run_dir:
-                dest = json_path or os.path.join(str(run_dir), "transcript.json")
-                hit["transcript_path"] = write_transcript_json(hit, dest)
+            if transcript_dest:
+                hit["transcript_path"] = write_transcript_json(hit, transcript_dest)
             return attach_container_warnings(hit, probe)
 
     windows = _chunk_windows(end - start, start, end, float(chunk_seconds), float(overlap_seconds))
@@ -659,9 +670,6 @@ def transcribe_media(
             _write_cache(cache_root, cache_key, result)
         except OSError:
             pass
-    dest = json_path
-    if dest is None and run_dir:
-        dest = os.path.join(str(run_dir), "transcript.json")
-    if dest:
-        result["transcript_path"] = write_transcript_json(result, dest)
+    if transcript_dest:
+        result["transcript_path"] = write_transcript_json(result, transcript_dest)
     return result
