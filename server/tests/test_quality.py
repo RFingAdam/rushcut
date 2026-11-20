@@ -229,3 +229,44 @@ def test_check_output_mcp_shape():
     )
     assert "checks" in result
     assert result["ok"] is False
+
+
+def test_python_m_rushcut_dispatches_subcommands_to_cli(tmp_path):
+    """`python -m rushcut check-loop` must reach the CLI, not start the MCP server."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "rushcut", "check-loop", str(tmp_path / "missing.mp4")],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert "Starting MCP server" not in proc.stderr + proc.stdout
+    assert "not found" in proc.stdout + proc.stderr
+
+
+def test_cli_check_missing_target_fails(tmp_path, capsys):
+    from rushcut.cli import main
+
+    missing = str(tmp_path / "missing.mp4")
+    assert main(["check", missing]) != 0
+    assert "target not found" in capsys.readouterr().err
+
+
+def test_cli_check_missing_target_with_loop_fails(tmp_path, capsys):
+    from rushcut.cli import main
+
+    assert main(["check", "--loop", str(tmp_path / "missing.mp4")]) != 0
+    assert "target not found" in capsys.readouterr().err
+
+
+def test_cli_check_no_arguments_fails(capsys):
+    from rushcut.cli import main
+
+    assert main(["check"]) != 0
+    out = capsys.readouterr()
+    assert "PASS" not in out.out
+    assert "no checks ran" in out.out

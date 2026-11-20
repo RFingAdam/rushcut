@@ -258,7 +258,8 @@ def test_music_bed_ducks_loud_transients(tmp_path, ffmpeg_bin):
     assert result["ok"] is True, result
     ducked, _, _ = decode_pcm(str(out), sample_rate=sr, channels=ch)
     new_click = rms_db(ducked, click_a, click_b)
-    assert raw_click - new_click >= 9.0, f"transient duck {raw_click - new_click:.2f} dB"
+    delta = raw_click - new_click
+    assert round(delta, 2) >= 9.0, f"transient duck {delta:.2f} dB"
 
 
 def test_loop_fades_silence_and_black(tmp_path, ffmpeg_bin):

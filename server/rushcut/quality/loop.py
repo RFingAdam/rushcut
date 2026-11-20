@@ -18,6 +18,14 @@ DEFAULT_SAMPLE_STEP = 0.5
 DEFAULT_MAX_EDGE_FADE_SECONDS = 0.08
 _EDGE_WINDOW_SECONDS = 0.35
 _FADE_BODY_DROP_DB = 3.0
+# Forced fades start from silence. A later speech/gunfire onset is not a fade.
+_SILENCE_DBFS = -45.0
+_NEAR_SILENCE_DBFS = -40.0
+_MIN_RAMP_SECONDS = 0.030
+_RAMP_MIN_RISE_DB = 8.0
+_RAMP_STEP_TOLERANCE_DB = 1.5
+# AAC encode/decode leaves a couple of ms just under the silence floor.
+_ENCODER_PRIMING_SECONDS = 0.010
 _SSIM_RE = re.compile(r"All:(\d+(?:\.\d+)?)")
 _PSNR_RE = re.compile(r"average:(\d+(?:\.\d+)?)", re.IGNORECASE)
 
@@ -149,13 +157,16 @@ def _pcm_tail(path: str, *, start: bool, seconds: float = 0.1, sample_rate: int 
             pass
 
 
-def _rms_db(pcm: bytes) -> float:
-    if len(pcm) < 4:
-        return -120.0
-    rms = audioop.rms(pcm, 2)
+def _linear_rms_db(rms: float) -> float:
     if rms <= 0:
         return -120.0
     return 20.0 * math.log10(rms / 32768.0)
+
+
+def _rms_db(pcm: bytes) -> float:
+    if len(pcm) < 4:
+        return -120.0
+    return _linear_rms_db(audioop.rms(pcm, 2))
 
 
 def _sample_step(first_pcm: bytes, last_pcm: bytes) -> float:
@@ -167,12 +178,62 @@ def _sample_step(first_pcm: bytes, last_pcm: bytes) -> float:
     return abs(last - first) / 32768.0
 
 
-def _edge_fade_seconds(pcm: bytes, sample_rate: int, *, from_start: bool) -> float:
-    """Seconds of fade-to-silence at an edge, measured against the far half.
+def _is_silence_edge_fade(
+    levels_db: list[float], *, from_start: bool, frame_seconds: float
+) -> bool:
+    """True when the edge ramps up from silence, not from program audio.
 
-    A forced fade (``loop_fades``) stays well below the body level for
-    tens of milliseconds. Seamless loops must not do that: last frame
-    has to match frame 1, not black or silence.
+    ``loop_fades`` / ``afade`` start near digital silence. A later speech
+    or gunfire peak inside the 0.35 s window is not a forced fade: the
+    seam is already at program level.
+
+    AAC encoder priming / decoder padding is a couple of milliseconds
+    just under the silence floor, then program audio. That is not a
+    fade. Skip a leading (or trailing, once reversed) silent run
+    shorter than ``_ENCODER_PRIMING_SECONDS`` before deciding.
+    """
+    if not levels_db:
+        return False
+    edge = list(levels_db) if from_start else list(reversed(levels_db))
+    if frame_seconds > 0:
+        silent_n = 0
+        while silent_n < len(edge) and edge[silent_n] <= _SILENCE_DBFS:
+            silent_n += 1
+        if 0 < silent_n < len(edge) and silent_n * frame_seconds < _ENCODER_PRIMING_SECONDS:
+            edge = edge[silent_n:]
+    if not edge:
+        return False
+    if edge[0] <= _SILENCE_DBFS:
+        return True
+    if frame_seconds <= 0:
+        return False
+    ramp_n = max(2, int(math.ceil(_MIN_RAMP_SECONDS / frame_seconds)))
+    if len(edge) < ramp_n:
+        return False
+    head = edge[:ramp_n]
+    start = min(head[: min(3, len(head))])
+    if start > _NEAR_SILENCE_DBFS:
+        return False
+    end = max(head[-3:]) if len(head) >= 3 else head[-1]
+    rises = 0
+    falls = 0
+    for a, b in zip(head, head[1:]):
+        if b + _RAMP_STEP_TOLERANCE_DB >= a:
+            rises += 1
+        else:
+            falls += 1
+    if falls > rises:
+        return False
+    return (end - start) >= _RAMP_MIN_RISE_DB
+
+
+def _edge_fade_seconds(pcm: bytes, sample_rate: int, *, from_start: bool) -> float:
+    """Seconds of fade-from-silence at an edge, measured against the far half.
+
+    A forced fade (``loop_fades``) starts near silence and stays well
+    below the body level for tens of milliseconds. A later onset in the
+    same window is not a fade: last frame has to match frame 1, not
+    black or silence, but the seam may already be at program level.
     """
     width = 2
     if len(pcm) < width * 32:
@@ -182,6 +243,12 @@ def _edge_fade_seconds(pcm: bytes, sample_rate: int, *, from_start: bool) -> flo
     if n < 8:
         return 0.0
     levels = [audioop.rms(pcm[i * frame : (i + 1) * frame], width) for i in range(n)]
+    frame_seconds = (frame // width) / float(sample_rate)
+    levels_db = [_linear_rms_db(v) for v in levels]
+    if not _is_silence_edge_fade(
+        levels_db, from_start=from_start, frame_seconds=frame_seconds
+    ):
+        return 0.0
     body = max(levels[n // 2 :]) if from_start else max(levels[: n - n // 2])
     if body <= 0:
         return 0.0
@@ -470,12 +537,20 @@ def check_loop(
     last_db = audio.get("audio_last_db")
     video_ok = bool(video.get("skipped") or video.get("pass"))
     audio_ok = bool(audio.get("skipped") or audio.get("pass"))
-    passed = video_ok and audio_ok
+    skipped = [
+        name for name, sub in (("video", video), ("audio", audio)) if sub.get("skipped")
+    ]
+    nothing_checked = len(skipped) == 2
+    passed = video_ok and audio_ok and not nothing_checked
     detail_parts = [p for p in (video.get("detail"), audio.get("detail")) if p]
+    if nothing_checked:
+        detail_parts.append("no video or audio stream was checked")
     return {
         "ok": True,
         "id": "loop_seam",
         "pass": passed,
+        "skipped": nothing_checked,
+        "skipped_checks": skipped,
         "mode": str(mode).lower(),
         "ssim": ssim,
         "ssim_min": float(ssim_min),
