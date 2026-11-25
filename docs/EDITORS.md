@@ -7,7 +7,7 @@ MCP tool names stay the same. `DIRECTOR_EDITOR` selects the backend:
 | `ffmpeg` | Headless ffmpeg encode | None (ffmpeg) | No (headless) |
 | `vegas` (default) | MAGIX VEGAS Pro 22 C# host, TCP `127.0.0.1:8752` | VEGAS Pro license | Yes |
 | `resolve` | DaVinci Resolve **Studio** via `DaVinciResolveScript` | Studio ($295 perpetual) | Yes |
-| `otio` (aliases: `fcpxml`, `mlt`, `kdenlive`, `shotcut`) | In-memory timeline I/O; `project.save` writes `.otio` / `.fcpxml` / `.mlt` | None | No |
+| `otio` (aliases: `fcpxml`, `mlt`, `kdenlive`, `shotcut`) | In-memory timeline I/O; `project.save` writes `.otio` / `.fcpxml` / `.mlt` / `.xmeml` (FCP7 XML), plus `.chapters.txt` / `.chapters.srt`; markers go in each format's native marker element | None | No |
 
 VEGAS behaviour is unchanged when `DIRECTOR_EDITOR` is unset. FFmpeg is
 the path that does not need a GUI NLE: [FFMPEG.md](FFMPEG.md).
