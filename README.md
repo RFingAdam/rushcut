@@ -86,6 +86,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .                   # add ".[whisper]" for local transcription
                                    # ".[analysis]" for numpy STFT / encode-aware TP
                                    # ".[denoise]" for optional DeepFilterNet
+                                   # ".[ocr]" for on-screen text (needs tesseract)
 ```
 
 Smoke-test it without an MCP client:
@@ -162,7 +163,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-102 tools, generated from the server's registered tool list. Tool names are
+104 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -177,7 +178,7 @@ reason instead of raising.
 | Markers (3) | `add_marker`, `list_markers`, `delete_marker` |
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (11) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack`, `pick_frame`, `compose_thumbnail`, `frame_check` |
-| Analysis, no NLE needed (12) | `probe_media`, `detect_scenes`, `analyze_audio`, `score_hook`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers` |
+| Analysis, no NLE needed (14) | `probe_media`, `detect_scenes`, `analyze_audio`, `score_hook`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers`, `read_screen_regions`, `match_template` |
 | Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
@@ -291,9 +292,36 @@ Slice with `start_seconds` / `end_seconds`; returned times stay absolute to
 the source. Long files are chunked (default 10 min, 30 s overlap),
 drift-checked, and cached when `cache_dir` / `run_dir` is set. Separate mic
 and mix tracks can label words `host` / `other` / `overlap` via
-`attribute_speakers`. On-screen OCR remains #26. Unfinalized recordings
+`attribute_speakers`. On-screen text and graphics: see below. Unfinalized recordings
 (MKV with no header duration) are flagged by `probe_media` and remuxed by
 `repair_media` / `stitch_session`.
+
+### On-screen text and graphics
+
+Two file-level tools read what is drawn on screen. Both are local and
+CPU-only, sample frames at `fps` (default 2, so times are within one
+sampling step), skip regions whose pixels did not change, and cache results
+by file fingerprint plus parameters (`RUSHCUT_CACHE_DIR`, default the system
+temp folder). Each result carries `frames_read` and `runtime_seconds`.
+
+- `read_screen_regions(path, regions, fps=2, start_seconds=None,
+  end_seconds=None, min_confidence=0.95)` OCRs each named region
+  (`{name, rect, whitelist?, numeric?}`) with tesseract and emits only changes:
+  `[{t, region, text, confidence}]`. The first event per region is its value
+  at `start_seconds`. `numeric: true` restricts to digits plus `,.$` and adds
+  a parsed `value`. Reads under the confidence floor (global or per region)
+  are listed in `rejected`, not emitted. Needs the `.[ocr]` extra and the
+  `tesseract` binary; without them the tool returns `{"ok": false, "error":
+  ..., "install": "pip install 'rushcut-mcp[ocr]'"}`.
+- `match_template(path, templates, regions=None, fps=2, threshold=0.8,
+  min_duration=0.5, merge_gap=0.5)` finds fixed graphics (banner, icon,
+  pop-up PNGs) by normalized cross-correlation and returns
+  `[{start, end, template, score, rect}]` spans. Uses OpenCV when it is
+  installed, numpy otherwise. `regions` limits the search area.
+
+Rects are `{x,y,w,h}` or `[x,y,w,h]`, in pixels or 0-1 fractions. Both tools
+also read regions and templates from a profile's `screen` block (below) when
+`regions` / `templates` are omitted.
 
 ### `edit_profile.yaml`
 
@@ -318,6 +346,12 @@ quality:
 shorts:
   max_seconds: 30.0
   loop: true
+screen:                      # optional: read_screen_regions / match_template
+  regions:
+    - {name: counter, rect: [0.02, 0.03, 0.25, 0.08], numeric: true}
+    - {name: status, rect: {x: 40, y: 960, w: 600, h: 60}}
+  templates:
+    - {name: banner, path: templates/banner.png, region: status, threshold: 0.85}
 output_roots:
   - D:\\MediaOut
 work_roots:

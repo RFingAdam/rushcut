@@ -32,6 +32,8 @@ File-level tools (no timeline required):
 | `stitch_session` | group recordings by gap, remux unfinalized MKVs, concat, offset map |
 | `session_lookup` | map session time onto a source file |
 | `detect_region_presence` | per-second overlay/face presence in a box |
+| `read_screen_regions` | OCR named regions over time, emit only text changes (tesseract, `[ocr]` extra) |
+| `match_template` | spans where a fixed graphic (PNG template) is on screen |
 | `cut_media` | trim to a time range (also accepts session time) |
 | `concat_media` | join files in order (stream-copy when codecs match; else quality preset) |
 | `reframe_media` | cover-crop to width × height (optional pan/zoom) |

@@ -192,6 +192,104 @@ class TranscriptSettings(BaseModel):
     model: str = "auto"
 
 
+RectValue = list[float] | dict[str, float]
+
+
+def _check_rect(value: Any, where: str) -> Any:
+    if isinstance(value, list):
+        if len(value) != 4:
+            raise ValueError(f"{where}: rect must be [x, y, w, h]")
+    elif isinstance(value, dict):
+        if not any(k in value for k in ("w", "width")) or not any(k in value for k in ("h", "height")):
+            raise ValueError(f"{where}: rect must have w and h")
+    return value
+
+
+class ScreenRegion(BaseModel):
+    """A named on-screen area for read_screen_regions (OCR)."""
+
+    model_config = ConfigDict(extra="allow")
+    name: str
+    rect: RectValue
+    whitelist: str | None = None
+    numeric: bool = False
+    min_confidence: float | None = None
+    psm: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("screen.regions[].name: must be non-empty")
+        return value.strip()
+
+    @field_validator("rect")
+    @classmethod
+    def _rect(cls, value: Any) -> Any:
+        return _check_rect(value, "screen.regions[].rect")
+
+    @field_validator("min_confidence")
+    @classmethod
+    def _conf(cls, value: float | None) -> float | None:
+        if value is not None and not 0.0 <= value <= 1.0:
+            raise ValueError("screen.regions[].min_confidence: must be in [0, 1]")
+        return value
+
+
+class ScreenTemplate(BaseModel):
+    """A fixed graphic (PNG) for match_template, optionally tied to a region."""
+
+    model_config = ConfigDict(extra="allow")
+    name: str
+    path: str
+    threshold: float | None = None
+    region: str | RectValue | None = None
+
+    @field_validator("name", "path")
+    @classmethod
+    def _non_empty(cls, value: str, info: Any) -> str:
+        if not value.strip():
+            raise ValueError(f"screen.templates[].{info.field_name}: must be non-empty")
+        return value.strip()
+
+    @field_validator("threshold")
+    @classmethod
+    def _threshold(cls, value: float | None) -> float | None:
+        if value is not None and not -1.0 <= value <= 1.0:
+            raise ValueError("screen.templates[].threshold: must be in [-1, 1]")
+        return value
+
+    @field_validator("region")
+    @classmethod
+    def _region(cls, value: Any) -> Any:
+        if isinstance(value, (list, dict)):
+            return _check_rect(value, "screen.templates[].region")
+        return value
+
+
+class ScreenSettings(BaseModel):
+    """On-screen regions and templates for read_screen_regions / match_template."""
+
+    model_config = ConfigDict(extra="allow")
+    regions: list[ScreenRegion] = Field(default_factory=list)
+    templates: list[ScreenTemplate] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _names(self) -> ScreenSettings:
+        region_names = [r.name for r in self.regions]
+        if len(set(region_names)) != len(region_names):
+            raise ValueError("screen.regions: names must be unique")
+        template_names = [t.name for t in self.templates]
+        if len(set(template_names)) != len(template_names):
+            raise ValueError("screen.templates: names must be unique")
+        for tpl in self.templates:
+            if isinstance(tpl.region, str) and tpl.region not in region_names:
+                raise ValueError(
+                    f"screen.templates.{tpl.name}.region: unknown region {tpl.region!r}"
+                )
+        return self
+
+
 class EditProfile(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
     schema_name: str = Field(default="rushcut.profile/v1", alias="schema")
@@ -209,6 +307,7 @@ class EditProfile(BaseModel):
     audio: AudioSettings = Field(default_factory=AudioSettings)
     lexicon: LexiconSettings = Field(default_factory=LexiconSettings)
     transcript: TranscriptSettings = Field(default_factory=TranscriptSettings)
+    screen: ScreenSettings | None = None
 
     @field_validator("required_features")
     @classmethod

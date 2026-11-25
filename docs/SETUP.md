@@ -204,6 +204,13 @@ faster-whisper uses CUDA when ctranslate2 reports a GPU, otherwise CPU
 int8. Missing extra is a soft `{ok:false}` — the rest of the pipeline still
 runs.
 
+Optional on-screen OCR for `read_screen_regions` (also needs the
+`tesseract` binary on PATH, e.g. the `tesseract-ocr` package):
+
+```bat
+pip install -e ".[ocr]"
+```
+
 Generic tool workflow: [skills/rushcut/SKILL.md](../skills/rushcut/SKILL.md).
 Old name notes: [MIGRATION.md](MIGRATION.md).
 

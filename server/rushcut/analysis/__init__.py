@@ -19,6 +19,7 @@ from .pacing import measure_pacing, pacing_from_words
 from .probe import file_still_writing, probe_media
 from .region import detect_region_presence
 from .scenes import detect_scenes
+from .screen import match_template, read_screen_regions
 from .session import lookup_session_time, repair_media, stitch_session
 from .speakers import attribute_speakers
 from .transcript import analyze_transcript, attach_speakers, speech_spans_from_words
@@ -44,6 +45,7 @@ __all__ = [
     "insert_audio",
     "lookup_session_time",
     "loop_fades",
+    "match_template",
     "master_audio",
     "measure_loudness",
     "measure_pacing",
@@ -51,6 +53,7 @@ __all__ = [
     "normalize_audio",
     "pacing_from_words",
     "probe_media",
+    "read_screen_regions",
     "reframe_media",
     "repair_media",
     "replace_audio_span",

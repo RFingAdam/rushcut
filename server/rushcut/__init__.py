@@ -929,6 +929,68 @@ def detect_region_presence(
 
 
 @mcp.tool()
+def read_screen_regions(
+    path: str,
+    regions: list[dict[str, Any]] | None = None,
+    fps: float = 2.0,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    min_confidence: float = 0.95,
+    change_threshold: float = 0.002,
+    profile: dict[str, Any] | str | None = None,
+    use_cache: bool = True,
+) -> dict:
+    """OCR named regions ({name, rect, whitelist?, numeric?}) over time; emit only changes [{t, region, text, confidence}]. Local tesseract (rushcut-mcp[ocr]). No NLE."""
+    from .analysis.screen import read_screen_regions as _read
+
+    return _read(
+        path,
+        regions,
+        fps=fps,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        min_confidence=min_confidence,
+        change_threshold=change_threshold,
+        profile=profile,
+        use_cache=use_cache,
+    )
+
+
+@mcp.tool()
+def match_template(
+    path: str,
+    templates: list[Any] | None = None,
+    regions: list[Any] | None = None,
+    fps: float = 2.0,
+    threshold: float = 0.8,
+    min_duration: float = 0.5,
+    merge_gap: float = 0.5,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    scale: float | None = None,
+    profile: dict[str, Any] | str | None = None,
+    use_cache: bool = True,
+) -> dict:
+    """Find fixed graphics (banner/icon PNGs) over time; return [{start, end, template, score, rect}] spans. Normalized cross-correlation, CPU. No NLE."""
+    from .analysis.screen import match_template as _match
+
+    return _match(
+        path,
+        templates,
+        regions,
+        fps=fps,
+        threshold=threshold,
+        min_duration=min_duration,
+        merge_gap=merge_gap,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        scale=scale,
+        profile=profile,
+        use_cache=use_cache,
+    )
+
+
+@mcp.tool()
 def check_loop(
     path: str,
     ssim_min: float = 0.85,
