@@ -31,7 +31,7 @@ pass (or builds the same events on VEGAS / Resolve). The CLI is
 | Field | Role |
 |---|---|
 | `schema` | `rushcut.edit/v1` |
-| `output.preset` | `vertical` (1080×1920), `1080p`, `4k` |
+| `output.preset` | `vertical` (1080×1920), `1080p`, `4k`; delivery presets `vertical_30`, `hd_30`, `hd_60` (60 fps), `uhd` encode the final file with the exact args in `render/presets.py` |
 | `output.width` / `height` / `fps` | override the preset |
 | `join_fade_ms` | 2–20 ms micro-fades on each segment edge so jump cuts do not click (default 8) |
 | `segments[].source` | media path |
@@ -50,10 +50,14 @@ audio; the `fps` filter holds A/V within one output frame.
 
 ## Sidecar round trip
 
-`apply_timeline` writes `<output>.edit.json` with the same `segments` /
-`output` / `join_fade_ms` it rendered. That sidecar can be passed back into
-`apply_timeline`. `write_edit_sidecar(..., timeline=edit)` stores the same
-shape.
+`apply_timeline` writes `<output>.edit.json`. Since `sidecar_version: 2`
+the whole edit document it rendered is stored under `timeline`, so keys
+beyond `segments` / `output` / `join_fade_ms` / `effects` survive. Those
+four are still copied to the top level for older readers. Pass the sidecar
+path back into `apply_timeline` to re-render it; a v2 sidecar renders from
+`timeline`, an older one from its top-level keys.
+`write_edit_sidecar(output, timeline=edit)` and
+`render_with_preset(..., timeline=edit)` store the same shape.
 
 ## VEGAS / Resolve
 

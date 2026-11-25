@@ -34,7 +34,7 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "preset": { "type": "string", "enum": ["vertical", "1080p", "4k"] },
+        "preset": { "type": "string", "enum": ["vertical", "1080p", "4k", "vertical_30", "hd_30", "hd_60", "uhd"] },
         "width": { "type": "integer", "minimum": 2 },
         "height": { "type": "integer", "minimum": 2 },
         "fps": { "type": "number", "exclusiveMinimum": 0 },

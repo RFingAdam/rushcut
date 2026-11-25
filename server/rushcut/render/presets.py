@@ -1,7 +1,110 @@
-"""Named render presets. Template names are matched against VEGAS's list."""
+"""Named render presets.
+
+Two families live here:
+
+* ``vertical`` / ``1080p`` / ``4k`` -- size-only presets. Their names are
+  matched against VEGAS's render template list (see :func:`match_preset`);
+  the template decides the codec settings.
+* ``vertical_30`` / ``hd_30`` / ``hd_60`` / ``uhd`` -- MP4 delivery presets
+  with fixed encode settings. On VEGAS / Resolve they still pick the closest
+  template by size; the FFmpeg backend and ``apply_timeline`` encode the final
+  file with exactly the arguments from :func:`delivery_ffmpeg_args`, and
+  ``verify_output(preset=...)`` checks the result against them.
+
+Delivery presets, as ffmpeg output arguments (between the inputs and the
+destination path)::
+
+    vertical_30  1080x1920, 30 fps
+      -vf scale=1080:1920:force_original_aspect_ratio=decrease,
+          pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30
+      -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p
+      -c:a aac -b:a 192k -ar 48000 -ac 2
+      -movflags +faststart
+
+    hd_30        1920x1080, 30 fps  (same args, 1920:1080, fps=30)
+    hd_60        1920x1080, 60 fps  (same args, 1920:1080, fps=60)
+    uhd          3840x2160, 30 fps  (same args, 3840:2160, fps=30)
+
+The ``-vf`` chain is a no-op when the program is already at the preset size
+and rate (the FFmpeg backend composes it that way); it only letterboxes and
+conforms when the args are applied to some other file. Frame rate is
+conformed with the ``fps`` filter rather than ``-r`` (see docs/EDIT_JSON.md).
+``verify_output`` expects: h264 video, yuv420p, the preset's size and
+frame rate, AAC audio at 48 kHz, and ``moov`` ahead of ``mdat`` (faststart).
+
+``master=True`` on ``render_with_preset`` (or ``master: true`` on a preset)
+runs two-pass ``master_audio`` on the delivered file. It keeps the 48 kHz
+source rate and writes AAC 192k with the video stream-copied; the file is
+then remuxed with ``+faststart`` (audio is re-encoded to the preset's
+settings only if it no longer matches).
+"""
 from __future__ import annotations
 
 from typing import Any
+
+# Encode settings shared by every delivery preset.
+DELIVERY_ENCODE: dict[str, Any] = {
+    "encoder": "libx264",
+    "x264_preset": "medium",
+    "crf": 19,
+    "pix_fmt": "yuv420p",
+    "video_codec": "h264",
+    "audio_encoder": "aac",
+    "audio_codec": "aac",
+    "audio_bitrate": "192k",
+    "sample_rate": 48000,
+    "channels": 2,
+    "faststart": True,
+}
+
+# name -> (width, height, fps, label, template substrings for VEGAS matching)
+_DELIVERY_SIZES: dict[str, tuple[int, int, int, str, list[str]]] = {
+    "vertical_30": (
+        1080,
+        1920,
+        30,
+        "Vertical 1080x1920 30p (x264 CRF 19)",
+        ["1080x1920", "vertical", "9:16", "9x16", "portrait", "tiktok", "30p", "29.97", "30 fps"],
+    ),
+    "hd_30": (
+        1920,
+        1080,
+        30,
+        "HD 1920x1080 30p (x264 CRF 19)",
+        ["1920x1080", "1080p", "30p", "29.97", "30 fps"],
+    ),
+    "hd_60": (
+        1920,
+        1080,
+        60,
+        "HD 1920x1080 60p (x264 CRF 19)",
+        ["1920x1080", "1080p", "60p", "59.94", "60 fps"],
+    ),
+    "uhd": (
+        3840,
+        2160,
+        30,
+        "UHD 3840x2160 30p (x264 CRF 19)",
+        ["3840x2160", "2160", "uhd", "4k", "30p", "29.97", "30 fps"],
+    ),
+}
+
+DELIVERY_PRESETS: dict[str, dict[str, Any]] = {
+    name: {
+        "name": name,
+        "width": w,
+        "height": h,
+        "fps": fps,
+        "label": label,
+        "renderer_contains": "MP4",
+        "template_contains": "",
+        "prefer_template_substrings": prefers,
+        "master": False,
+        "delivery": True,
+        **DELIVERY_ENCODE,
+    }
+    for name, (w, h, fps, label, prefers) in _DELIVERY_SIZES.items()
+}
 
 RENDER_PRESETS: dict[str, dict[str, Any]] = {
     "vertical": {
@@ -44,6 +147,91 @@ RENDER_PRESETS: dict[str, dict[str, Any]] = {
         "master": False,
     },
 }
+
+RENDER_PRESETS.update(DELIVERY_PRESETS)
+
+
+def delivery_preset(name: str | None) -> dict[str, Any] | None:
+    """The delivery preset spec for *name*, or ``None`` (size-only / unknown)."""
+    if not name:
+        return None
+    return DELIVERY_PRESETS.get(str(name).lower())
+
+
+def delivery_video_filter(name: str) -> str:
+    """The ``-vf`` chain for a delivery preset (size + letterbox + fps conform)."""
+    spec = DELIVERY_PRESETS[str(name).lower()]
+    w, h, fps = spec["width"], spec["height"], spec["fps"]
+    return (
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"setsar=1,fps={fps}"
+    )
+
+
+def delivery_ffmpeg_args(name: str, *, video_filter: bool = True) -> list[str]:
+    """Exact ffmpeg output args for a delivery preset.
+
+    Goes between the inputs and the destination path. ``video_filter=False``
+    drops the ``-vf`` pair for callers that build their own filter graph
+    (they must still end it at the preset size and ``fps``).
+    """
+    spec = DELIVERY_PRESETS.get(str(name).lower())
+    if spec is None:
+        raise KeyError(f"unknown delivery preset {name!r}; use {', '.join(DELIVERY_PRESETS)}")
+    args: list[str] = []
+    if video_filter:
+        args.extend(["-vf", delivery_video_filter(name)])
+    args.extend(
+        [
+            "-c:v",
+            spec["encoder"],
+            "-preset",
+            spec["x264_preset"],
+            "-crf",
+            str(spec["crf"]),
+            "-pix_fmt",
+            spec["pix_fmt"],
+            "-c:a",
+            spec["audio_encoder"],
+            "-b:a",
+            spec["audio_bitrate"],
+            "-ar",
+            str(spec["sample_rate"]),
+            "-ac",
+            str(spec["channels"]),
+        ]
+    )
+    if spec.get("faststart"):
+        args.extend(["-movflags", "+faststart"])
+    return args
+
+
+def preset_expectations(name: str | None) -> dict[str, Any] | None:
+    """What ``verify_output(preset=name)`` checks, or ``None`` for unknown names.
+
+    Size-only presets check width/height; delivery presets add fps, codecs,
+    pix_fmt, sample rate and faststart.
+    """
+    if not name:
+        return None
+    spec = RENDER_PRESETS.get(str(name).lower())
+    if spec is None:
+        return None
+    expect: dict[str, Any] = {"width": spec["width"], "height": spec["height"]}
+    if spec.get("delivery"):
+        expect.update(
+            {
+                "fps": float(spec["fps"]),
+                "video_codec": spec["video_codec"],
+                "pix_fmt": spec["pix_fmt"],
+                "audio_codec": spec["audio_codec"],
+                "sample_rate": int(spec["sample_rate"]),
+                "faststart": bool(spec.get("faststart")),
+            }
+        )
+    return expect
+
 
 # MAGIX AVC/AAC MP4 templates sometimes omit "MP4" from FileTypeName.
 _MP4_ALIASES = ("mp4", "avc", "aac", "hevc", "x264", "x265", "mpeg-4", "mpeg4")
@@ -102,7 +290,10 @@ def match_preset(preset: str, templates: list[dict[str, Any]]) -> dict[str, Any]
     """Pick the best VEGAS renderer/template for a named preset."""
     spec = RENDER_PRESETS.get(preset.lower())
     if spec is None:
-        return {"ok": False, "error": f"unknown preset {preset!r}; use vertical, 1080p, or 4k"}
+        return {
+            "ok": False,
+            "error": f"unknown preset {preset!r}; use {', '.join(RENDER_PRESETS)}",
+        }
     width, height = spec["width"], spec["height"]
 
     scored = _score_templates(templates, spec, require_renderer=True)

@@ -160,6 +160,7 @@ def _apply_loudnorm(
     target_tp: float,
     target_lra: float,
     measured: dict[str, Any],
+    sample_rate: int | None = None,
 ) -> None:
     def _num(key: str, fallback: float) -> str:
         raw = measured.get(key)
@@ -187,6 +188,9 @@ def _apply_loudnorm(
             "-vn",
             "-af",
             filt,
+            # loudnorm upsamples to 192 kHz internally; keep the source rate
+            # so the delivered AAC is not 192 kHz.
+            *(["-ar", str(int(sample_rate))] if sample_rate else []),
             dest,
         ],
         timeout=600,
@@ -401,7 +405,15 @@ def master_audio(
     aac_path = os.path.join(tmpdir, "probe.m4a")
     try:
         measured = _loudnorm_measure(path, target_i, target_tp, target_lra)
-        _apply_loudnorm(path, measured_wav, target_i, target_tp, target_lra, measured)
+        _apply_loudnorm(
+            path,
+            measured_wav,
+            target_i,
+            target_tp,
+            target_lra,
+            measured,
+            sample_rate=probe.get("sample_rate") or 48000,
+        )
         current = measured_wav
         iterations = 0
         last_tp = None

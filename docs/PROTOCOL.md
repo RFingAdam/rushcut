@@ -91,7 +91,7 @@ Almost every VEGAS-side failure is a JSON-RPC **result** with
 | `transport.stop` | — | |
 | `transport.seek` | `seconds` | cursor position |
 | `render.list_templates` | `renderer_contains?`, `template_contains?`, `limit?`, `offset?` | `limit=0` (host default) = unlimited; `truncated` when a positive limit was hit |
-| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?` | Python rewrites `output_path` to `<name>.partial.mp4`; default `async=true` → `BeginRender` + `job_id`. Refuses paths outside `RUSHCUT_OUTPUT_ROOTS`. |
+| `render.start` | `output_path`, `template_name?`, `renderer_name?`, `start_seconds?`, `length_seconds?`, `async?`, `delivery_preset?` (FFmpeg backend only) | Python rewrites `output_path` to `<name>.partial.mp4`; default `async=true` → `BeginRender` + `job_id`. Refuses paths outside `RUSHCUT_OUTPUT_ROOTS`. |
 | `render.status` | `job_id?` | `{state, percent, output_path, partial_path?}` — `interrupted` if ffmpeg was killed |
 | `project.set_video` | `width?`, `height?`, `frame_rate?` | |
 
@@ -111,6 +111,11 @@ Python-only (not host RPC): `probe_media`, `detect_scenes`, `analyze_audio`,
 `apply_timeline` / `render_with_preset` compose the RPCs above. `apply_timeline`
 also renders an `edit.json` timeline (schema in [EDIT_JSON.md](EDIT_JSON.md)).
 The FFmpeg backend implements the same RPC names and encodes on `render.start`.
+Its `render.start` also takes `delivery_preset` (`vertical_30` / `hd_30` / `hd_60` / `uhd`):
+the final file is encoded with that preset's exact ffmpeg args from
+`server/rushcut/render/presets.py`. Other hosts ignore it and render from the matched template.
+`render_with_preset` takes `timeline` (an edit.json document) and stores it in the sidecar;
+`verify_output` takes `preset` and returns per-field `preset_checks`.
 
 ## Threading
 

@@ -187,7 +187,11 @@ reason instead of raising.
 
 Times on the wire are always **seconds** (`start_seconds`, `length_seconds`).
 `length_seconds=-1` means "use the full remaining media length".
-`render_with_preset` knows `vertical` (1080x1920), `1080p` and `4k`.
+`render_with_preset` knows `vertical` (1080x1920), `1080p` and `4k`, plus the
+MP4 delivery presets `vertical_30` (1080x1920 30p), `hd_30`, `hd_60` (1920x1080)
+and `uhd` (3840x2160 30p): x264 CRF 19, yuv420p, AAC 192k 48 kHz, `+faststart`.
+The exact ffmpeg args are in `server/rushcut/render/presets.py`;
+`verify_output(path, preset="hd_60")` checks each field.
 
 ## Quality checks
 

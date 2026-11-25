@@ -322,12 +322,17 @@ def render_start(
     start_seconds: float | None = None,
     length_seconds: float | None = None,
     async_render: bool = True,
+    delivery_preset: str | None = None,
 ) -> dict:
     """Start a render. Default is async (Vegas.BeginRender) so the UI marshal returns.
 
     The backend is asked to write ``<name>.partial.mp4``. The file is
     renamed to *output_path* only after ``wait_for_render`` (or a
     blocking start) verifies moov + a full decode.
+
+    ``delivery_preset`` (``vertical_30`` / ``hd_30`` / ``hd_60`` / ``uhd``)
+    makes the FFmpeg backend encode with that preset's exact args
+    (``render/presets.py``). Template-driven hosts ignore it.
     """
     params: dict[str, Any] = {"async": async_render}
     final_path = output_path
@@ -348,6 +353,8 @@ def render_start(
         params["start_seconds"] = start_seconds
     if length_seconds is not None:
         params["length_seconds"] = length_seconds
+    if delivery_preset is not None:
+        params["delivery_preset"] = delivery_preset
     result = _call("render.start", params)
     if isinstance(result, dict):
         result = dict(result)
@@ -516,12 +523,22 @@ def render_with_preset(
     wait: bool = True,
     timeout_seconds: float = 1800,
     master: bool | None = None,
+    timeline: dict[str, Any] | None = None,
 ) -> dict:
-    """Named preset → async render → poll → ffprobe verify → sidecar JSON."""
+    """Named preset → async render → poll → ffprobe verify → sidecar JSON.
+
+    Delivery presets (``vertical_30`` / ``hd_30`` / ``hd_60`` / ``uhd``)
+    are encoded with their exact args on the FFmpeg backend and verified
+    field by field (``verify.preset_checks``). ``timeline`` is the edit.json
+    document behind this render; the sidecar stores it so
+    ``apply_timeline(<sidecar>)`` can re-render.
+    """
     from .render.presets import RENDER_PRESETS, match_preset
     from .render.sidecar import verify_output, write_sidecar
 
     spec = RENDER_PRESETS.get(preset.lower())
+    delivery = (spec or {}).get("name") if (spec or {}).get("delivery") else None
+    verify_preset = {"preset": delivery} if delivery else {}
     renderer_f = (spec or {}).get("renderer_contains") or ""
     template_f = (spec or {}).get("template_contains") or ""
     listed = _list_all_render_templates(renderer_f, template_f)
@@ -543,6 +560,7 @@ def render_with_preset(
         start_seconds=start_seconds,
         length_seconds=length_seconds,
         async_render=True,
+        delivery_preset=delivery,
     )
     if not started.get("ok"):
         return {**started, "preset": matched}
@@ -561,18 +579,37 @@ def render_with_preset(
             expect_height=spec["height"] if spec else None,
             expect_audio=True,
             expect_duration=length_seconds,
+            **verify_preset,
         )
-        sidecar = write_sidecar(output_path, edit_meta, extra={"preset": preset, "verify": verify})
+        sidecar = write_sidecar(
+            output_path,
+            edit_meta,
+            extra={"preset": preset, "verify": verify},
+            timeline=timeline,
+        )
     mastered = None
     want_master = master if master is not None else bool((spec or {}).get("master"))
     if wait and want_master and os.path.isfile(output_path):
         from .analysis.loudness import master_audio
 
-        mastered = master_audio(output_path, output_path)
+        # ffmpeg cannot read and write one file, so master to a sibling
+        # and move it over the render.
+        root, ext = os.path.splitext(output_path)
+        mastered_tmp = f"{root}.mastering{ext or '.mp4'}"
+        try:
+            mastered = master_audio(output_path, mastered_tmp)
+            if mastered.get("ok") and os.path.isfile(mastered_tmp):
+                os.replace(mastered_tmp, output_path)
+                mastered = {**mastered, "output_path": output_path}
+        finally:
+            if os.path.exists(mastered_tmp):
+                os.remove(mastered_tmp)
+        if mastered.get("ok") and delivery:
+            mastered["delivery_conform"] = _conform_delivery_audio(output_path, delivery)
         if mastered.get("ok") and sidecar and sidecar.get("sidecar_path"):
             extra = dict((sidecar.get("extra") or {}))
             extra["master"] = mastered
-            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra, timeline=timeline)
         if verify is not None:
             verify = verify_output(
                 output_path,
@@ -580,6 +617,7 @@ def render_with_preset(
                 expect_height=spec["height"] if spec else None,
                 expect_audio=True,
                 expect_duration=length_seconds,
+                **verify_preset,
             )
     quality = None
     profile_spec = (edit_meta or {}).get("profile")
@@ -601,9 +639,11 @@ def render_with_preset(
         if sidecar and sidecar.get("sidecar_path"):
             extra = dict((sidecar.get("extra") or {}))
             extra["quality"] = quality
-            sidecar = write_sidecar(output_path, edit_meta, extra=extra)
+            sidecar = write_sidecar(output_path, edit_meta, extra=extra, timeline=timeline)
     ok = bool(status.get("ok"))
     if quality is not None and not quality.get("ok"):
+        ok = False
+    if delivery and verify is not None and not verify.get("ok"):
         ok = False
     return {
         "ok": ok,
@@ -617,6 +657,60 @@ def render_with_preset(
         "master": mastered,
         "output_path": output_path,
     }
+
+
+def _conform_delivery_audio(path: str, preset: str) -> dict:
+    """Put a delivery preset's audio settings + faststart back after mastering.
+
+    ``master_audio`` copies video and writes AAC 192k at the source sample
+    rate, but does not move ``moov`` to the front.
+    Video stays a stream copy; audio is re-encoded only when it no longer
+    matches the preset.
+    """
+    from .analysis.ffmpeg_util import run as _run
+    from .analysis.ffmpeg_util import which_ffmpeg
+    from .analysis.probe import probe_media
+    from .render.presets import delivery_preset
+    from .render.sidecar import moov_before_mdat
+
+    spec = delivery_preset(preset)
+    if spec is None or not os.path.isfile(path):
+        return {"ok": False, "error": f"no delivery preset {preset!r} or missing file"}
+    probe = probe_media(path)
+    audio_ok = (
+        probe.get("audio_codec") == spec["audio_codec"]
+        and probe.get("sample_rate") == spec["sample_rate"]
+        and probe.get("channels") == spec["channels"]
+    )
+    if audio_ok and moov_before_mdat(path) is True:
+        return {"ok": True, "changed": False}
+    root, ext = os.path.splitext(path)
+    tmp = f"{root}.conform{ext or '.mp4'}"
+    cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-y", "-i", path, "-map", "0", "-c:v", "copy"]
+    if audio_ok:
+        cmd.extend(["-c:a", "copy"])
+    else:
+        cmd.extend(
+            [
+                "-c:a",
+                spec["audio_encoder"],
+                "-b:a",
+                spec["audio_bitrate"],
+                "-ar",
+                str(spec["sample_rate"]),
+                "-ac",
+                str(spec["channels"]),
+            ]
+        )
+    cmd.extend(["-movflags", "+faststart", tmp])
+    try:
+        _run(cmd, timeout=600)
+        os.replace(tmp, path)
+    except Exception as exc:  # noqa: BLE001 — report, keep the mastered file
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "changed": True, "audio_reencoded": not audio_ok}
 
 
 def export_review_pack(
