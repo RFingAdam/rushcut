@@ -45,6 +45,7 @@ File-level tools (no timeline required):
 | `track_circle` / `lens_zoom` | dark-ring tracker + circular magnify |
 | `make_text_card` / overlay | title-card PNG + image/alpha overlay |
 | `pick_frame` / `compose_thumbnail` / `frame_check` | sharpest frame, split thumbs, labelled contact sheet |
+| `pick_thumbnail_frames` | top-n ranked thumbnail candidates (timestamps + PNGs), skips blurred/smeared/overlay frames |
 | `analyze_noise_floor` / `audio_cleanup` | band floors, notches, high-pass, optional adaptive tonal / mid-side |
 | `generate_captions` / `burn_captions` | SRT + ASS (chunking, mask, karaoke); burn-in timeout/preset/CRF scale with program length |
 | `detect_scenes` / `analyze_audio` / `transcribe_media` / `score_hook` | grounding (chunked/cached word timestamps; optional diarize / mic-mix attribution; `initial_prompt`; opening-window hook score) |

@@ -1423,6 +1423,36 @@ def pick_frame(
 
 
 @mcp.tool()
+def pick_thumbnail_frames(
+    path: str,
+    n: int = 6,
+    sample_fps: float = 2.0,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+    min_gap_seconds: float = 2.0,
+    skip_regions: list[Any] | None = None,
+    output_dir: str | None = None,
+    write_png: bool = True,
+    overlay_threshold: float = 20.0,
+) -> dict:
+    """Top-n thumbnail candidates as timestamps + PNGs, ranked by sharpness, contrast, subject size, clear text area and face (when OpenCV is installed). Rejects blurred, motion-smeared and overlay frames (skip_regions boxes). No NLE."""
+    from .analysis.thumbnails import pick_thumbnail_frames as _pick
+
+    return _pick(
+        path,
+        n,
+        sample_fps=sample_fps,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        min_gap_seconds=min_gap_seconds,
+        skip_regions=skip_regions,
+        output_dir=output_dir,
+        write_png=write_png,
+        overlay_threshold=overlay_threshold,
+    )
+
+
+@mcp.tool()
 def compose_thumbnail(
     frames: list[str] | str,
     output_path: str,
