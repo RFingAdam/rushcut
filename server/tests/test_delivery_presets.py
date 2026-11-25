@@ -314,3 +314,17 @@ def test_ffmpeg_backend_delivery_burns_captions(monkeypatch, tmp_path, color_cli
     assert checked["ok"] is True, checked["problems"]
     bad = backend.call("render.start", {"output_path": str(tmp_path / "x.mp4"), "async": False, "delivery_preset": "nope"})
     assert bad["ok"] is False and "vertical_30" in bad["error"]
+
+
+def test_preset_fps_accepts_ntsc_rates():
+    from rushcut.render.sidecar import _preset_checks, fps_matches
+
+    assert fps_matches(29.97, 30.0) and fps_matches(29.970, 30.0)
+    assert fps_matches(59.94, 60.0)
+    assert fps_matches(30.0, 30.0) and fps_matches(60.0, 60.0)
+    assert not fps_matches(25.0, 30.0)
+    assert not fps_matches(29.5, 30.0)
+    assert not fps_matches(30.0, 60.0)
+    assert _preset_checks("unused.mp4", {"fps": 30000 / 1001}, {"fps": 30})["fps"]["ok"] is True
+    assert _preset_checks("unused.mp4", {"fps": 60000 / 1001}, {"fps": 60})["fps"]["ok"] is True
+    assert _preset_checks("unused.mp4", {"fps": 25.0}, {"fps": 30})["fps"]["ok"] is False

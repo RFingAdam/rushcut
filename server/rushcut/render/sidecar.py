@@ -167,6 +167,17 @@ def _norm_codec(name: Any) -> str:
     return {"avc": "h264", "avc1": "h264", "x264": "h264", "libx264": "h264"}.get(text, text)
 
 
+def fps_matches(actual: float, expected: float, tolerance: float = 0.01) -> bool:
+    """True when ``actual`` is ``expected`` or its NTSC rate (x 1000/1001).
+
+    VEGAS and Resolve render 29.97 / 59.94 by default, so a 30 or 60 fps
+    preset accepts those too. Default chosen here; tighten if exact rates
+    are required.
+    """
+    ntsc = expected * 1000.0 / 1001.0
+    return abs(actual - expected) < tolerance or abs(actual - ntsc) < tolerance
+
+
 def _preset_checks(
     path: str,
     probe: dict[str, Any],
@@ -187,7 +198,7 @@ def _preset_checks(
     if "fps" in expect:
         fps = probe.get("fps")
         actual_fps = round(float(fps), 3) if fps else None
-        add("fps", expect["fps"], actual_fps, actual_fps is not None and abs(actual_fps - expect["fps"]) < 0.01)
+        add("fps", expect["fps"], actual_fps, actual_fps is not None and fps_matches(actual_fps, float(expect["fps"])))
     if "video_codec" in expect:
         actual = probe.get("video_codec")
         add("video_codec", expect["video_codec"], actual, _norm_codec(actual) == expect["video_codec"])
