@@ -10,7 +10,7 @@ from ..analysis.probe import probe_media
 from ..output_policy import check_output_path, make_work_dir
 from ..render.atomic import run_ffmpeg_atomic
 from ..render.presets import delivery_ffmpeg_args, delivery_preset
-from ..render.sidecar import verify_output, write_sidecar
+from ..render.sidecar import fps_matches, verify_output, write_sidecar
 from .filters import (
     atempo_chain,
     blur_filter_complex,
@@ -672,7 +672,7 @@ def apply_edit(
         if (
             delivery is not None
             and (width, height) == (delivery["width"], delivery["height"])
-            and abs(fps - float(delivery["fps"])) < 0.01
+            and fps_matches(fps, float(delivery["fps"]))
         ):
             preset_verify = verify_output(
                 dest, preset=delivery["name"], expect_audio=False, decode=False

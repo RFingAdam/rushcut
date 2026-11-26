@@ -17,6 +17,7 @@ from rushcut.render.presets import (
     DELIVERY_PRESETS,
     RENDER_PRESETS,
     delivery_ffmpeg_args,
+    delivery_rate,
     match_preset,
     preset_expectations,
 )
@@ -328,3 +329,64 @@ def test_preset_fps_accepts_ntsc_rates():
     assert _preset_checks("unused.mp4", {"fps": 30000 / 1001}, {"fps": 30})["fps"]["ok"] is True
     assert _preset_checks("unused.mp4", {"fps": 60000 / 1001}, {"fps": 60})["fps"]["ok"] is True
     assert _preset_checks("unused.mp4", {"fps": 25.0}, {"fps": 30})["fps"]["ok"] is False
+
+
+def test_delivery_fps_conform_keeps_ntsc_program_rate():
+    vf = delivery_ffmpeg_args("hd_30", source_fps=30000 / 1001)[1]
+    assert vf.endswith(",fps=30000/1001")
+    assert delivery_ffmpeg_args("hd_60", source_fps=59.94)[1].endswith(",fps=60000/1001")
+    assert delivery_ffmpeg_args("hd_30", source_fps=30.0)[1].endswith(",fps=30")
+    assert delivery_ffmpeg_args("hd_30", source_fps=25.0)[1].endswith(",fps=30")
+    # 59.94 is not the NTSC rate of a 30 fps preset.
+    assert delivery_ffmpeg_args("hd_30", source_fps=59.94)[1].endswith(",fps=30")
+    assert delivery_ffmpeg_args("hd_30")[1].endswith(",fps=30")
+    assert delivery_rate("uhd", 29.97) == (30000 / 1001, "30000/1001")
+
+
+def test_ffmpeg_backend_delivery_keeps_ntsc_project_rate(monkeypatch, tmp_path, color_clip):
+    _ffmpeg_backend(monkeypatch)
+    tools.new_project(discard_unsaved=True)
+    tools.set_project_video(frame_rate=29.97)
+    tools.add_track("video", "V1")
+    tools.add_video_event(0, str(color_clip), 0.0, 1.0)
+    out = tmp_path / "ntsc.mp4"
+    result = tools.render_with_preset(str(out), "hd_30", wait=True, timeout_seconds=180)
+    assert result["ok"] is True, result
+    probe = probe_media(str(out))
+    assert abs(float(probe["fps"]) - 30000 / 1001) < 0.001
+    assert result["verify"]["preset_checks"]["fps"]["ok"] is True
+
+
+def test_render_with_preset_template_host_gets_faststart_and_audio(monkeypatch, tmp_path, ffmpeg_bin):
+    """A VEGAS / Resolve template that writes moov last at 44.1 kHz is fixed without master."""
+    templates = [
+        {"renderer": "MAGIX AVC/AAC MP4", "template": "Internet HD 1080p 29.97 fps", "width": 1920, "height": 1080},
+    ]
+    monkeypatch.setattr(tools, "_list_all_render_templates", lambda *a, **k: {"ok": True, "templates": templates})
+
+    def fake_start(output_path, **kwargs):
+        _run(
+            [
+                ffmpeg_bin, "-hide_banner", "-y",
+                "-f", "lavfi", "-i", "testsrc=duration=0.5:size=1920x1080:rate=30000/1001",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5:sample_rate=44100",
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                output_path,
+            ]
+        )
+        return {"ok": True, "job_id": "j1", "used_mode": "vegas"}
+
+    monkeypatch.setattr(tools, "render_start", fake_start)
+    monkeypatch.setattr(tools, "wait_for_render", lambda job_id, **k: {"ok": True, "state": "complete"})
+    out = tmp_path / "vegas.mp4"
+    result = tools.render_with_preset(str(out), "hd_30", master=False, wait=True)
+    assert result["delivery_conform"] == {"ok": True, "changed": True, "audio_reencoded": True}
+    assert result["master"] is None
+    checks = result["verify"]["preset_checks"]
+    assert checks["faststart"]["ok"] is True
+    assert checks["sample_rate"]["actual"] == 48000
+    assert checks["fps"]["ok"] is True
+    assert result["ok"] is True, result["verify"]["problems"]
+    sidecar = json.loads(Path(result["sidecar"]["sidecar_path"]).read_text(encoding="utf-8"))
+    assert sidecar["extra"]["delivery_conform"]["changed"] is True

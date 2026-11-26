@@ -29,6 +29,9 @@ The ``-vf`` chain is a no-op when the program is already at the preset size
 and rate (the FFmpeg backend composes it that way); it only letterboxes and
 conforms when the args are applied to some other file. Frame rate is
 conformed with the ``fps`` filter rather than ``-r`` (see docs/EDIT_JSON.md).
+A program at the preset's NTSC rate (29.97 / 59.94) keeps it: pass
+``source_fps`` and the filter becomes ``fps=30000/1001`` / ``fps=60000/1001``
+instead of dropping or duplicating frames to reach 30 / 60.
 ``verify_output`` expects: h264 video, yuv420p, the preset's size and
 frame rate, AAC audio at 48 kHz, and ``moov`` ahead of ``mdat`` (faststart).
 
@@ -158,30 +161,53 @@ def delivery_preset(name: str | None) -> dict[str, Any] | None:
     return DELIVERY_PRESETS.get(str(name).lower())
 
 
-def delivery_video_filter(name: str) -> str:
+def is_ntsc_of(fps: float | None, nominal: float, tolerance: float = 0.01) -> bool:
+    """True when *fps* is the NTSC rate (x 1000/1001) of *nominal*, e.g. 29.97 for 30."""
+    if not fps:
+        return False
+    return abs(float(fps) - nominal * 1000.0 / 1001.0) < tolerance
+
+
+def delivery_rate(name: str, source_fps: float | None = None) -> tuple[float, str]:
+    """``(fps, fps-filter rate)`` for a delivery preset.
+
+    The preset's integer rate, unless *source_fps* is its NTSC rate: then
+    ``30000/1001`` / ``60000/1001`` so a 29.97 / 59.94 program is left alone.
+    """
+    nominal = int(DELIVERY_PRESETS[str(name).lower()]["fps"])
+    if is_ntsc_of(source_fps, nominal):
+        return nominal * 1000.0 / 1001.0, f"{nominal * 1000}/1001"
+    return float(nominal), str(nominal)
+
+
+def delivery_video_filter(name: str, source_fps: float | None = None) -> str:
     """The ``-vf`` chain for a delivery preset (size + letterbox + fps conform)."""
     spec = DELIVERY_PRESETS[str(name).lower()]
-    w, h, fps = spec["width"], spec["height"], spec["fps"]
+    w, h = spec["width"], spec["height"]
+    rate = delivery_rate(name, source_fps)[1]
     return (
         f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
         f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"setsar=1,fps={fps}"
+        f"setsar=1,fps={rate}"
     )
 
 
-def delivery_ffmpeg_args(name: str, *, video_filter: bool = True) -> list[str]:
+def delivery_ffmpeg_args(
+    name: str, *, video_filter: bool = True, source_fps: float | None = None
+) -> list[str]:
     """Exact ffmpeg output args for a delivery preset.
 
     Goes between the inputs and the destination path. ``video_filter=False``
     drops the ``-vf`` pair for callers that build their own filter graph
-    (they must still end it at the preset size and ``fps``).
+    (they must still end it at the preset size and ``fps``). ``source_fps``
+    is the program's rate; an NTSC program keeps its NTSC rate.
     """
     spec = DELIVERY_PRESETS.get(str(name).lower())
     if spec is None:
         raise KeyError(f"unknown delivery preset {name!r}; use {', '.join(DELIVERY_PRESETS)}")
     args: list[str] = []
     if video_filter:
-        args.extend(["-vf", delivery_video_filter(name)])
+        args.extend(["-vf", delivery_video_filter(name, source_fps)])
     args.extend(
         [
             "-c:v",

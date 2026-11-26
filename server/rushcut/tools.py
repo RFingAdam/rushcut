@@ -572,6 +572,12 @@ def render_with_preset(
             return {**status, "started": started, "preset": matched}
     verify = None
     sidecar = None
+    conform = None
+    if wait and delivery and os.path.isfile(output_path):
+        # VEGAS / Resolve templates may write moov last or use their own
+        # audio settings; remux (+faststart) and fix audio to the preset.
+        # A no-op on the FFmpeg backend's output.
+        conform = _conform_delivery_audio(output_path, delivery)
     if wait and os.path.isfile(output_path):
         verify = verify_output(
             output_path,
@@ -581,10 +587,13 @@ def render_with_preset(
             expect_duration=length_seconds,
             **verify_preset,
         )
+        extra_meta: dict[str, Any] = {"preset": preset, "verify": verify}
+        if conform is not None:
+            extra_meta["delivery_conform"] = conform
         sidecar = write_sidecar(
             output_path,
             edit_meta,
-            extra={"preset": preset, "verify": verify},
+            extra=extra_meta,
             timeline=timeline,
         )
     mastered = None
@@ -655,15 +664,18 @@ def render_with_preset(
         "sidecar": sidecar,
         "quality": quality,
         "master": mastered,
+        "delivery_conform": conform,
         "output_path": output_path,
     }
 
 
 def _conform_delivery_audio(path: str, preset: str) -> dict:
-    """Put a delivery preset's audio settings + faststart back after mastering.
+    """Put a delivery preset's audio settings + faststart on a rendered file.
 
-    ``master_audio`` copies video and writes AAC 192k at the source sample
-    rate, but does not move ``moov`` to the front.
+    Runs after every delivery render: VEGAS / Resolve templates can write
+    ``moov`` after ``mdat`` or other audio settings, and ``master_audio``
+    copies video and writes AAC 192k at the source sample rate but does not
+    move ``moov`` to the front.
     Video stays a stream copy; audio is re-encoded only when it no longer
     matches the preset.
     """

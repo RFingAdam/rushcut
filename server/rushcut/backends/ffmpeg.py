@@ -27,6 +27,7 @@ from ..render.presets import (
     DELIVERY_PRESETS,
     delivery_ffmpeg_args,
     delivery_preset,
+    delivery_rate,
     delivery_video_filter,
 )
 from .otio import OtioBackend
@@ -310,7 +311,8 @@ class FfmpegBackend:
             )
         if delivery is not None:
             width, height = int(delivery["width"]), int(delivery["height"])
-            fps = float(delivery["fps"])
+            # A 29.97 / 59.94 project stays NTSC; anything else goes to 30 / 60.
+            fps = delivery_rate(delivery["name"], fps)[0]
         elif "1080x1920" in template_name or "vertical" in template_name or "9:16" in template_name:
             width, height = 1080, 1920
         elif "3840" in template_name or "4k" in template_name or "2160" in template_name:
@@ -349,6 +351,7 @@ class FfmpegBackend:
                     delivery,
                     duration,
                     ass_path=str(caption) if has_caption else None,
+                    source_fps=fps,
                 )
             elif has_caption:
                 burned = burn_captions(program, str(caption), output_path)
@@ -383,16 +386,20 @@ class FfmpegBackend:
         duration: float,
         *,
         ass_path: str | None = None,
+        source_fps: float | None = None,
     ) -> None:
-        """Final encode with the delivery preset's exact ffmpeg args."""
+        """Final encode with the delivery preset's exact ffmpeg args.
+
+        ``source_fps`` is the program's rate, so an NTSC program keeps it.
+        """
         name = delivery["name"]
         cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-y", "-i", program]
         if ass_path:
             ass_esc = ass_path.replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
-            cmd.extend(["-vf", f"{delivery_video_filter(name)},ass='{ass_esc}'"])
+            cmd.extend(["-vf", f"{delivery_video_filter(name, source_fps)},ass='{ass_esc}'"])
             cmd.extend(delivery_ffmpeg_args(name, video_filter=False))
         else:
-            cmd.extend(delivery_ffmpeg_args(name))
+            cmd.extend(delivery_ffmpeg_args(name, source_fps=source_fps))
         cmd.append(dest)
         run(
             cmd,
