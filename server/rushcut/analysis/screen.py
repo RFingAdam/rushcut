@@ -9,7 +9,8 @@ otherwise.
 Both read grayscale frames from ffmpeg at ``fps`` (sample k is the frame at
 ``start + k / fps``), skip work on regions whose pixels did not change since
 the last evaluation, and cache results keyed by a file fingerprint plus the
-call's parameters.
+call's parameters. If ffmpeg stops producing frames, what was read so far is
+returned with ``partial: true`` (and not cached).
 """
 from __future__ import annotations
 
@@ -17,15 +18,17 @@ import hashlib
 import json
 import math
 import os
+import queue
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from .ffmpeg_util import FfmpegError, decode_timeout_seconds, which_ffmpeg
+from .ffmpeg_util import FfmpegError, which_ffmpeg
 from .probe import probe_media
 from .region import _parse_box
 
@@ -47,6 +50,10 @@ _OCR_MIN_HEIGHT = 96
 _OCR_PAD = 10
 _MAX_REJECTED = 200
 _AUTO_SCALE_WIDTH = 960
+# ffmpeg must hand over a frame at least this often (and at least every
+# _STALL_SAMPLE_PERIODS sample periods). OCR / matching time is not counted.
+_STALL_MIN_SECONDS = 60.0
+_STALL_SAMPLE_PERIODS = 10.0
 
 
 # ---------------------------------------------------------------- helpers
@@ -180,6 +187,15 @@ def _store(key: str | None, result: dict[str, Any]) -> dict[str, Any]:
 # ----------------------------------------------------------------- frames
 
 
+class FrameStall(FfmpegError):
+    """ffmpeg stopped delivering frames. Frames already yielded are still valid."""
+
+
+def _partial_info(exc: Exception, last_t: float) -> dict[str, Any]:
+    """Result fields for a read that stopped early: results cover up to ``read_until``."""
+    return {"partial_reason": str(exc), "read_until": _round_t(last_t)}
+
+
 def _iter_frames(
     path: str,
     *,
@@ -190,7 +206,15 @@ def _iter_frames(
     out_size: tuple[int, int] | None = None,
     timeout: float | None = None,
 ) -> Iterator[tuple[float, bytes]]:
-    """Yield (t, gray bytes) for sample k at exactly start + k / fps."""
+    """Yield (t, gray bytes) for sample k at exactly start + k / fps.
+
+    A reader thread pulls frames off ffmpeg's pipe, so a stalled ffmpeg
+    cannot block the caller. ``timeout`` (default: the larger of
+    ``_STALL_MIN_SECONDS`` and ``_STALL_SAMPLE_PERIODS`` sample periods) is
+    how long ffmpeg may go without producing a frame; time the caller spends
+    on each frame does not count. On a stall ffmpeg is killed and
+    :class:`FrameStall` is raised after the frames read so far.
+    """
     cx, cy, cw, ch = crop
     filters = [f"fps={fps:.6f}:round=up", f"crop={cw}:{ch}:{cx}:{cy}"]
     ow, oh = cw, ch
@@ -209,27 +233,59 @@ def _iter_frames(
         "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1",
     ]
     frame_size = ow * oh
-    deadline = time.monotonic() + float(timeout or decode_timeout_seconds(end - start))
+    stall = float(timeout) if timeout else max(_STALL_MIN_SECONDS, _STALL_SAMPLE_PERIODS / fps)
     with tempfile.TemporaryFile() as errfile:
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errfile)
         except FileNotFoundError as exc:
             raise FfmpegError(f"Executable not found: {cmd[0]}") from exc
         assert proc.stdout is not None
+        stdout = proc.stdout
+        frames: queue.Queue[bytes | None] = queue.Queue(maxsize=4)
+        stop = threading.Event()
+
+        def _put(item: bytes | None) -> bool:
+            while not stop.is_set():
+                try:
+                    frames.put(item, timeout=0.5)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
+        def _reader() -> None:
+            try:
+                while True:
+                    buf = stdout.read(frame_size)
+                    if not buf or len(buf) < frame_size or not _put(buf):
+                        break
+            except (OSError, ValueError):
+                pass
+            finally:
+                _put(None)
+
+        reader = threading.Thread(target=_reader, name="rushcut-frames", daemon=True)
+        reader.start()
         k = 0
         try:
             while True:
-                if time.monotonic() > deadline:
-                    raise FfmpegError(f"Timed out reading frames from {path}")
-                buf = proc.stdout.read(frame_size)
-                if not buf or len(buf) < frame_size:
+                try:
+                    buf = frames.get(timeout=stall)
+                except queue.Empty:
+                    proc.kill()
+                    raise FrameStall(
+                        f"ffmpeg produced no frame for {stall:.0f}s after {k} frame(s) from {path}"
+                    ) from None
+                if buf is None:
                     break
                 yield start + k / fps, buf
                 k += 1
         finally:
+            stop.set()
             if proc.poll() is None:
                 proc.kill()
             proc.wait()
+            reader.join(timeout=5)
         if proc.returncode not in (0, None) and k == 0:
             errfile.seek(0)
             err = errfile.read().decode("utf-8", "replace").strip()
@@ -476,11 +532,15 @@ def read_screen_regions(
     rejected: list[dict[str, Any]] = []
     stats = {"ocr_calls": 0, "unchanged_skips": 0, "blank_skips": 0, "rejected": 0}
     frames_read = 0
+    last_t: float | None = None
+    partial: dict[str, Any] | None = None
+    tess_errors = tuple(e for e in (getattr(tess, "TesseractError", None),) if isinstance(e, type))
+    spec: dict[str, Any] = {}
+    frames = _iter_frames(path, start=start, end=end, fps=fps_f, crop=(ux, uy, uw, uh))
     try:
-        for t, buf in _iter_frames(
-            path, start=start, end=end, fps=fps_f, crop=(ux, uy, uw, uh)
-        ):
+        for t, buf in frames:
             frames_read += 1
+            last_t = t
             frame = np.frombuffer(buf, dtype=np.uint8).reshape((uh, uw))
             for spec in specs:
                 r = spec["rect"]
@@ -530,8 +590,17 @@ def read_screen_regions(
                 if spec["numeric"]:
                     event["value"] = value
                 events.append(event)
+    except FrameStall as exc:
+        if last_t is None:
+            return {"ok": False, "error": str(exc)}
+        partial = _partial_info(exc, last_t)
     except FfmpegError as exc:
         return {"ok": False, "error": str(exc)}
+    except tess_errors as exc:
+        where = f" (region {spec.get('name')!r} at {_round_t(last_t)}s)" if last_t is not None else ""
+        return {"ok": False, "error": f"tesseract failed{where}: {exc}"}
+    finally:
+        frames.close()
 
     result: dict[str, Any] = {
         "ok": True,
@@ -547,8 +616,12 @@ def read_screen_regions(
         "rejected": rejected,
         "stats": stats,
         "frames_read": frames_read,
+        "partial": partial is not None,
         "runtime_seconds": round(time.monotonic() - started, 4),
     }
+    if partial is not None:
+        result.update(partial)
+        key = None  # never cache a cut-short read
     return _store(key, result)
 
 
@@ -876,11 +949,13 @@ def match_template(
     }
     stats = {"match_calls": 0, "unchanged_skips": 0}
     frames_read = 0
+    last_t: float | None = None
+    partial: dict[str, Any] | None = None
+    frames = _iter_frames(path, start=start, end=end, fps=fps_f, crop=(ux, uy, uw, uh), out_size=(ow, oh))
     try:
-        for t, buf in _iter_frames(
-            path, start=start, end=end, fps=fps_f, crop=(ux, uy, uw, uh), out_size=(ow, oh)
-        ):
+        for t, buf in frames:
             frames_read += 1
+            last_t = t
             frame = np.frombuffer(buf, dtype=np.uint8).reshape((oh, ow))
             for p in plan:
                 th, tw = p["arr"].shape
@@ -912,8 +987,14 @@ def match_template(
                         best = (score, rect, a["name"])
                 t_thr = p["threshold"] if p["threshold"] is not None else thr
                 samples[p["name"]].append((t, best[0] >= t_thr, best[0], best[1], best[2]))
+    except FrameStall as exc:
+        if last_t is None:
+            return {"ok": False, "error": str(exc)}
+        partial = _partial_info(exc, last_t)
     except FfmpegError as exc:
         return {"ok": False, "error": str(exc)}
+    finally:
+        frames.close()
 
     step = 1.0 / fps_f
     spans: list[dict[str, Any]] = []
@@ -944,6 +1025,10 @@ def match_template(
         "spans": spans,
         "stats": stats,
         "frames_read": frames_read,
+        "partial": partial is not None,
         "runtime_seconds": round(time.monotonic() - started, 4),
     }
+    if partial is not None:
+        result.update(partial)
+        key = None  # never cache a cut-short read
     return _store(key, result)

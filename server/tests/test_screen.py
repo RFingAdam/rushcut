@@ -389,3 +389,98 @@ def test_profile_screen_block_round_trip():
 def test_profile_screen_block_rejects_bad_input(screen_block, message):
     with pytest.raises(ValueError, match=message):
         profile_from_data({"screen": screen_block})
+
+
+# ----------------------------------------------------- stalls and errors
+
+
+def _stalling_ffmpeg(tmp_path: Path, frames: int) -> Path:
+    """A stand-in ffmpeg that writes `frames` blank frames, then hangs."""
+    script = tmp_path / "stall_ffmpeg.py"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import re, sys, time\n"
+        "vf = sys.argv[sys.argv.index('-vf') + 1]\n"
+        "w, h = map(int, re.search(r'crop=(\\d+):(\\d+)', vf).groups())\n"
+        "m = re.search(r'scale=(\\d+):(\\d+)', vf)\n"
+        "if m:\n"
+        "    w, h = map(int, m.groups())\n"
+        f"sys.stdout.buffer.write(bytes(w * h) * {frames})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(60)\n"
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_match_template_stalled_ffmpeg_returns_partial(hud, tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("FFMPEG_BIN", str(_stalling_ffmpeg(tmp_path, frames=3)))
+    monkeypatch.setattr(screen, "_STALL_MIN_SECONDS", 1.0)
+    monkeypatch.setattr(screen, "_STALL_SAMPLE_PERIODS", 0.0)
+    began = time.monotonic()
+    result = match_template(str(hud["video"]), [str(hud["banner"])], engine="numpy")
+    # The hung ffmpeg is killed after the stall budget, not after it exits by itself.
+    assert time.monotonic() - began < 20
+    assert result["ok"] is True, result
+    assert result["partial"] is True
+    assert result["frames_read"] == 3
+    assert result["read_until"] == 1.0
+    assert "no frame" in result["partial_reason"]
+    # A cut-short read is not cached.
+    assert result["cache"]["key"] is None
+
+
+def test_match_template_stall_before_any_frame_is_an_error(hud, tmp_path, monkeypatch):
+    monkeypatch.setenv("FFMPEG_BIN", str(_stalling_ffmpeg(tmp_path, frames=0)))
+    monkeypatch.setattr(screen, "_STALL_MIN_SECONDS", 1.0)
+    monkeypatch.setattr(screen, "_STALL_SAMPLE_PERIODS", 0.0)
+    result = match_template(str(hud["video"]), [str(hud["banner"])], engine="numpy")
+    assert result["ok"] is False
+    assert "no frame" in result["error"]
+
+
+class _FakeTesseractError(Exception):
+    pass
+
+
+def _fake_ocr(monkeypatch, ocr_crop) -> None:
+    fake = type(sys)("pytesseract")
+    fake.TesseractError = _FakeTesseractError
+    monkeypatch.setattr(screen, "_load_ocr", lambda: (fake, "5.0.0", None))
+    monkeypatch.setattr(screen, "_ocr_crop", ocr_crop)
+
+
+def test_read_screen_regions_slow_ocr_is_not_a_stall(hud, monkeypatch):
+    """The stall budget counts only time waiting on ffmpeg, never OCR time."""
+    import time
+
+    calls = []
+
+    def slow_ocr(np_mod, tess, crop, spec):
+        calls.append(spec["name"])
+        if len(calls) == 1:
+            time.sleep(1.5)
+        return "ROUND", 1.0
+
+    _fake_ocr(monkeypatch, slow_ocr)
+    monkeypatch.setattr(screen, "_STALL_MIN_SECONDS", 1.0)
+    monkeypatch.setattr(screen, "_STALL_SAMPLE_PERIODS", 0.0)
+    result = read_screen_regions(str(hud["video"]), [LABEL], use_cache=False)
+    assert result["ok"] is True, result
+    assert result["partial"] is False
+    assert result["frames_read"] == 20
+    assert [e["text"] for e in result["events"]] == ["ROUND"]
+
+
+def test_read_screen_regions_tesseract_error_is_an_error_result(hud, monkeypatch):
+    def broken_ocr(np_mod, tess, crop, spec):
+        raise _FakeTesseractError("(1, 'Error opening data file')")
+
+    _fake_ocr(monkeypatch, broken_ocr)
+    result = read_screen_regions(str(hud["video"]), [LABEL], use_cache=False)
+    assert result["ok"] is False
+    assert "tesseract failed" in result["error"]
+    assert "Error opening data file" in result["error"]
+    assert "label" in result["error"]
