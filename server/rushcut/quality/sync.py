@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -37,6 +38,10 @@ from ..analysis.ffmpeg_util import FfmpegError, which_ffmpeg
 SR = 16000
 _SIG_W, _SIG_H = 64, 36
 _MEDIA_EXTS = (".mkv", ".mp4", ".mov", ".ts", ".m4v", ".webm", ".flv", ".avi")
+# verify_sync's container checks use tape_audit's defaults.
+_CONTAINER_TAIL_S = 20.0
+_CONTAINER_END_MS = 100.0
+_CONTAINER_START_MS = 100.0
 
 
 def _np() -> Any:
@@ -50,15 +55,26 @@ def _np() -> Any:
 
 
 def _nice(cmd: list[str]) -> list[str]:
-    return ["nice", "-n", "15", *cmd] if os.name == "posix" and os.environ.get("RUSHCUT_NO_NICE") is None else cmd
+    """Run at low priority where ``nice`` exists (not on Windows)."""
+    if os.environ.get("RUSHCUT_NO_NICE") is not None:
+        return cmd
+    nice = shutil.which("nice")
+    return [nice, "-n", "15", *cmd] if nice else cmd
 
 
 def _run_bytes(cmd: list[str], timeout: float) -> tuple[bytes, str]:
+    """stdout bytes and stderr text; raises FfmpegError on a non-zero exit."""
     try:
         p = subprocess.run(_nice(cmd), capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as exc:
         raise FfmpegError(f"Timed out after {timeout:.0f}s: {cmd[0]}") from exc
-    return p.stdout, p.stderr.decode("utf-8", "replace")
+    except FileNotFoundError as exc:
+        raise FfmpegError(f"Executable not found: {cmd[0]}") from exc
+    err = p.stderr.decode("utf-8", "replace")
+    if p.returncode != 0:
+        tail = err.strip()[-800:]
+        raise FfmpegError(f"{os.path.basename(cmd[0])} exited {p.returncode}: {tail}", stderr=err)
+    return p.stdout, err
 
 
 def _ffprobe(path: str, args: list[str], timeout: float = 60) -> str:
@@ -107,6 +123,7 @@ def _stream_info(path: str) -> dict[str, Any]:
     return {
         "duration": _f(fmt.get("duration")),
         "start_time": 0.0,  # picture times are raw pts on both sides
+        "format_start": _f(fmt.get("start_time")) or 0.0,
         "video_start": (_f(vids[0].get("start_time")) or 0.0) if vids else 0.0,
         "audio_starts": [_f(a.get("start_time")) or 0.0 for a in auds],
         "fps": fps,
@@ -223,7 +240,7 @@ def _frames(path: str, ss: float, span: float, size: tuple[int, int], fps: float
     w, h = size
     vf = (f"fps={fps}," if fps else "") + f"scale={w}:{h}:flags=area,format=gray,showinfo"
     cmd = [which_ffmpeg("ffmpeg"), "-nostdin", "-v", "info", "-nostats", "-ss", f"{max(ss, 0):.4f}", "-t", f"{span:.4f}", "-copyts",
-           "-i", path, "-map", "0:v:0", "-vf", vf, "-fps_mode", "passthrough", "-f", "rawvideo", "-"]
+           "-i", path, "-map", "0:v:0", "-vf", vf, "-vsync", "0", "-f", "rawvideo", "-"]
     out, err = _run_bytes(cmd, timeout)
     pts = [float(m) for m in re.findall(r"pts_time:\s*(-?[0-9.]+)", err)]
     n = min(len(out) // (w * h), len(pts))
@@ -321,9 +338,12 @@ def verify_sync(
     seconds (0 for a render of the whole source). ``points`` are times in
     ``video`` to sample; by default start, middle and end.
 
-    Always reports container-level facts (stream duration/start mismatch). With
-    a ``source`` it adds sample-accurate audio lag (cross-correlation against
-    the source audio, sliced by sample from a full decode), picture lag (exact
+    Always runs the container-level checks of :func:`tape_audit` on ``video``
+    (packet timestamps only, no decode): audio ending away from video, audio/
+    video start skew and video timestamp gaps near the end. They come back
+    under ``container``; each flag is also a finding. With a ``source`` it
+    adds sample-accurate audio lag (cross-correlation against the source
+    audio, sliced by sample from a full decode), picture lag (exact
     frame match for stream-copied video, motion correlation otherwise), the
     resulting ``av_offset_ms`` (picture lag minus audio lag; positive = picture
     late against sound) and ``drift_ms`` across the sample points.
@@ -341,8 +361,13 @@ def verify_sync(
             return {"ok": False, "error": "duration unknown (unfinalized file?); run repair_media first"}
         result: dict[str, Any] = {"ok": True, "file": video, "duration": vinfo["duration"], "fps": vinfo["fps"],
                                   "convention": "positive = checked file later than the reference", "findings": []}
+        container = _tape_probe(video, _CONTAINER_TAIL_S)
+        container["flags"] = _judge(container, _CONTAINER_END_MS, _CONTAINER_START_MS)
+        result["container"] = container
+        result["findings"].extend(f"container: {f}" for f in container["flags"])
         if source is None:
             result["note"] = "no source given: container checks only; pass source for audio/video offset"
+            result["ok"] = not result["findings"]
             return result
         if not os.path.isfile(source):
             return {"ok": False, "error": f"source not found: {source}"}
@@ -382,19 +407,26 @@ def verify_sync(
 def _tape_probe(path: str, tail_seconds: float, head_packets: int = 3) -> dict[str, Any]:
     info = {"file": os.path.basename(path)}
     try:
-        dur = _stream_info(path)["duration"]
+        sinfo = _stream_info(path)
+        dur = sinfo["duration"]
         if not dur:
             return {**info, "error": "duration unknown (unfinalized file?)"}
         info["duration"] = round(dur, 3)
-        tail_from = f"{max(dur - tail_seconds, 0):.1f}%+{tail_seconds + 5:.0f}"
-        for sel, name in (("v:0", "video"), ("a:0", "audio0"), ("a:1", "audio1"), ("a:2", "audio2")):
+        # -read_intervals takes absolute timestamps: anchor the tail at the
+        # file's real end (start_time + duration), not at ``duration``.
+        start = sinfo["format_start"]
+        tail_from = f"{max(start + dur - tail_seconds, start):.3f}%+{tail_seconds + 5:.0f}"
+        # Only streams that exist: ffprobe fails a seek on a missing one.
+        streams = [("v:0", "video")] if sinfo["has_video"] else []
+        streams += [(f"a:{i}", f"audio{i}") for i in range(min(sinfo["audio_streams"], 3))]
+        if not sinfo["audio_streams"]:
+            info["audio0_missing"] = True
+        for sel, name in streams:
             first = _floats(_ffprobe(path, ["-select_streams", sel, "-show_entries", "packet=pts_time",
-                                            "-read_intervals", f"0%+#{head_packets}", "-of", "csv=p=0"]))
+                                            "-read_intervals", f"%+#{head_packets}", "-of", "csv=p=0"]))
             tail = sorted(_floats(_ffprobe(path, ["-select_streams", sel, "-show_entries", "packet=pts_time",
                                                   "-read_intervals", tail_from, "-of", "csv=p=0"], timeout=180)))
             if not first and not tail:
-                if name.startswith("audio") and name != "audio0":
-                    continue
                 if name == "audio0":
                     info["audio0_missing"] = True
                 continue
@@ -421,6 +453,8 @@ def _judge(info: dict[str, Any], end_ms: float, start_ms: float) -> list[str]:
     v_last = info.get("video_last")
     for k in ("audio0", "audio1", "audio2"):
         a_last = info.get(f"{k}_last")
+        if v_last is not None and a_last is None and info.get(f"{k}_first") is not None:
+            flags.append(f"{k} has no packets near the end of the file (ends early)")
         if v_last is not None and a_last is not None:
             diff = (v_last - a_last) * 1000
             info[f"{k}_end_mismatch_ms"] = round(diff, 1)

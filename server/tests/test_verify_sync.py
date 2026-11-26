@@ -69,6 +69,16 @@ def test_wrong_source_start_is_reported(source: Path, tmp_path: Path) -> None:
 def test_container_only_without_source(source: Path) -> None:
     r = verify_sync(str(source))
     assert r["ok"] and "container checks only" in r["note"]
+    assert r["container"]["flags"] == []
+    assert r["container"]["video_last"] is not None and r["container"]["audio0_last"] is not None
+
+
+def test_container_checks_flag_short_audio_without_source(source: Path, tmp_path: Path) -> None:
+    short = tmp_path / "short.mkv"
+    _ff("-i", str(source), "-c:v", "copy", "-af", "atrim=0:21", "-c:a", "aac", str(short))
+    r = verify_sync(str(short))
+    assert r["ok"] is False
+    assert any(f.startswith("container: audio0 ends") for f in r["findings"]), r["findings"]
 
 
 def test_cut_is_found_at_its_real_start(source: Path, tmp_path: Path) -> None:
@@ -93,7 +103,7 @@ def test_tape_audit_flags_short_audio_and_gaps(source: Path, tmp_path: Path) -> 
     _ff("-i", str(source), "-map", "0:v", "-map", "0:a", "-c:v", "copy", "-af", "atrim=0:21", "-c:a", "aac",
         str(folder / "short_audio.mkv"))
     # 0.5 s hole in video timestamps after frame 300
-    _ff("-i", str(source), "-vf", "setpts='if(gte(N,300),PTS+0.5/TB,PTS)'", "-fps_mode", "passthrough",
+    _ff("-i", str(source), "-vf", "setpts='if(gte(N,300),PTS+0.5/TB,PTS)'", "-vsync", "0",
         "-c:v", "libx264", "-preset", "veryfast", "-an", str(folder / "gappy.mkv"))
     r = tape_audit(str(folder), tail_seconds=30)
     by = {x["file"]: x for x in r["results"]}
@@ -111,3 +121,53 @@ def test_cli(source: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli_main(["verify-sync", str(source)]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
     assert cli_main(["tape-audit", str(source.parent)]) in (0, 2)
+
+
+def test_tape_audit_end_check_on_offset_timestamps(source: Path, tmp_path: Path) -> None:
+    """Timestamps starting near 1000 s: the tail read must still reach the real end."""
+    folder = tmp_path / "offset"
+    folder.mkdir()
+    _ff("-i", str(source), "-c:v", "copy", "-af", "atrim=0:21", "-c:a", "aac",
+        "-output_ts_offset", "1000", "-f", "mpegts", str(folder / "late_start.ts"))
+    r = tape_audit(str(folder), tail_seconds=5)
+    info = r["results"][0]
+    assert "error" not in info, info
+    assert info["video_last"] > 1020
+    assert any("audio0 ends" in f for f in info["flags"]), info
+
+
+def test_run_bytes_raises_on_ffmpeg_failure(tmp_path: Path) -> None:
+    from rushcut.analysis.ffmpeg_util import FfmpegError
+    from rushcut.quality.sync import _frames, _run_bytes
+
+    with pytest.raises(FfmpegError, match="exited"):
+        _run_bytes(["ffmpeg", "-v", "error", "-nostdin", "-i", str(tmp_path / "missing.mkv"), "-f", "null", "-"], 30)
+    with pytest.raises(FfmpegError):
+        _frames(str(tmp_path / "missing.mkv"), 0.0, 1.0, (16, 9), None, 30)
+
+
+def test_frames_uses_vsync_not_fps_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rushcut.quality import sync
+
+    seen: list[list[str]] = []
+
+    def fake(cmd: list[str], timeout: float) -> tuple[bytes, str]:
+        seen.append(cmd)
+        return b"", ""
+
+    monkeypatch.setattr(sync, "_run_bytes", fake)
+    sync._frames("x.mkv", 0.0, 1.0, (16, 9), None, 30)
+    assert "-fps_mode" not in seen[0]
+    assert seen[0][seen[0].index("-vsync") + 1] == "0"
+
+
+def test_nice_only_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rushcut.quality import sync
+
+    monkeypatch.delenv("RUSHCUT_NO_NICE", raising=False)
+    monkeypatch.setattr(sync.shutil, "which", lambda name: None)
+    assert sync._nice(["ffmpeg", "-i", "x"]) == ["ffmpeg", "-i", "x"]
+    monkeypatch.setattr(sync.shutil, "which", lambda name: "/usr/bin/nice")
+    assert sync._nice(["ffmpeg"]) == ["/usr/bin/nice", "-n", "15", "ffmpeg"]
+    monkeypatch.setenv("RUSHCUT_NO_NICE", "1")
+    assert sync._nice(["ffmpeg"]) == ["ffmpeg"]
