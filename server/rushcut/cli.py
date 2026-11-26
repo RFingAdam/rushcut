@@ -17,7 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Rushcut CLI. Quality checks: `rushcut check` "
             "(layout parity: `rushcut check --parity APPROVED CANDIDATE`). "
             "Session/media tools: `stitch-session`, `detect-region-presence`, "
-            "`score-hook`, `check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
+            "`score-hook`, `verify-sync`, `tape-audit`, `check-media`, `check-loop`, `check-seams`, `snap-cuts`. Story: `list-story-formats`, "
             "`plan-story-edit`, `measure-pacing`, `fits-cap`. "
             "Review: `export-review-pack`. Render: `rushcut apply edit.json -o out.mp4`. "
             "The MCP server is `rushcut-mcp` (or python -m rushcut with no args)."
@@ -193,6 +193,30 @@ def _build_parser() -> argparse.ArgumentParser:
     media.add_argument("--transcript", help="transcript JSON to skip Whisper")
     media.add_argument("--pad", type=float, default=0.12)
     media.add_argument("--json", action="store_true", dest="as_json")
+
+    vsync = sub.add_parser(
+        "verify-sync",
+        help="Audio/video offset of a file against a reference (sample-accurate audio, exact-frame picture)",
+    )
+    vsync.add_argument("video")
+    vsync.add_argument("--source", help="reference file (omit for container checks only)")
+    vsync.add_argument("--source-start", type=float, default=0.0, help="where VIDEO begins on the source timeline, seconds")
+    vsync.add_argument("--points", help="comma-separated sample times in VIDEO, seconds")
+    vsync.add_argument("--window", type=float, default=5.0, dest="window_seconds")
+    vsync.add_argument("--max-lag-ms", type=float, default=250.0)
+    vsync.add_argument("--audio-tolerance-ms", type=float, default=5.0)
+    vsync.add_argument("--av-tolerance-ms", type=float, default=20.0)
+    vsync.add_argument("--no-video", action="store_true", help="audio only")
+
+    audit = sub.add_parser(
+        "tape-audit",
+        help="Scan a recording folder for video/audio end mismatch and timestamp gaps (no decode)",
+    )
+    audit.add_argument("folder")
+    audit.add_argument("--tail", type=float, default=20.0, dest="tail_seconds")
+    audit.add_argument("--end-mismatch-ms", type=float, default=100.0)
+    audit.add_argument("--start-skew-ms", type=float, default=100.0)
+    audit.add_argument("--workers", type=int, default=2)
 
     stitch = sub.add_parser(
         "stitch-session",
@@ -511,6 +535,39 @@ def _cmd_check_media(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_verify_sync(args: argparse.Namespace) -> int:
+    from .quality.sync import verify_sync
+
+    points = [float(x) for x in args.points.split(",") if x.strip()] if args.points else None
+    result = verify_sync(
+        args.video,
+        source=args.source,
+        source_start=args.source_start,
+        points=points,
+        window_seconds=args.window_seconds,
+        max_lag_ms=args.max_lag_ms,
+        audio_tolerance_ms=args.audio_tolerance_ms,
+        av_tolerance_ms=args.av_tolerance_ms,
+        check_video=not args.no_video,
+    )
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
+def _cmd_tape_audit(args: argparse.Namespace) -> int:
+    from .quality.sync import tape_audit
+
+    result = tape_audit(
+        args.folder,
+        tail_seconds=args.tail_seconds,
+        end_mismatch_ms=args.end_mismatch_ms,
+        start_skew_ms=args.start_skew_ms,
+        workers=args.workers,
+    )
+    _print_json(result)
+    return 0 if result.get("ok") else 2
+
+
 def _cmd_stitch(args: argparse.Namespace) -> int:
     from .analysis.session import stitch_session
 
@@ -669,6 +726,8 @@ def main(argv: list[str] | None = None) -> int:
         "score-hook": _cmd_score_hook,
         "snap-cuts": _cmd_snap_cuts,
         "stitch-session": _cmd_stitch,
+        "tape-audit": _cmd_tape_audit,
+        "verify-sync": _cmd_verify_sync,
     }
     handler = commands.get(args.cmd)
     if handler is None:

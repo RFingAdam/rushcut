@@ -8,6 +8,7 @@ from .media import check_media, output_join_times
 from .parity import check_parity, format_parity_report
 from .ramps import check_speed_ramps, extract_ramp_steps
 from .seams import check_seams, format_seams_markdown, lf_352_boundary_spec, snap_cuts
+from .sync import tape_audit, verify_sync
 from .sources import check_source_preference, classify_source
 from .speech import (
     check_speech_boundaries,
@@ -38,6 +39,8 @@ __all__ = [
     "extract_ramp_steps",
     "format_parity_report",
     "format_report",
+    "tape_audit",
+    "verify_sync",
     "format_seams_markdown",
     "lf_352_boundary_spec",
     "output_join_times",
