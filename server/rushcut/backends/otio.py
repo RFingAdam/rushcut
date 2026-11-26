@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -576,8 +577,8 @@ def to_otio(state: OtioBackend) -> dict[str, Any]:
                 media_ref = {"OTIO_SCHEMA": "GeneratorReference.1", "name": ev.get("name") or "Title", "generator_kind": "title"}
             else:
                 url = ev.get("media_path") or ""
-                if url and not url.startswith("file:"):
-                    url = "file://" + quote(os.path.abspath(url).replace("\\", "/"), safe="/:")
+                if url:
+                    url = _file_url(url)
                 media_ref = {"OTIO_SCHEMA": "ExternalReference.1", "target_url": url, "name": ev.get("name")}
             children.append(
                 {
@@ -706,7 +707,7 @@ def to_fcpxml(state: OtioBackend) -> str:
         aid = f"r{n}"
         n += 1
         assets[path] = aid
-        src = path if path.startswith("file:") else "file://" + quote(os.path.abspath(path).replace("\\", "/"), safe="/:")
+        src = _file_url(path)
         ET.SubElement(
             resources,
             "asset",
@@ -721,7 +722,55 @@ def to_fcpxml(state: OtioBackend) -> str:
     video_tracks = [tr for tr in state.tracks if tr["type"] == "video"]
     primary = video_tracks[0]["events"] if video_tracks else []
     pending = _sorted_markers(state)
+    frame = 1.0 / state.fps
+
+    def _at(m: dict[str, Any]) -> float:
+        return max(0.0, float(m.get("at_seconds") or 0))
+
+    def _place(parent: ET.Element, lo: float, hi: float, origin: float, source_start: float) -> None:
+        """Write the pending markers in [lo, hi) onto *parent* (a clip or gap), in its own time.
+
+        *origin* is the timeline time of the element's first frame, which
+        sits at *source_start* in the element's own time.
+        """
+        nonlocal pending
+        inside = [m for m in pending if lo <= _at(m) < hi]
+        for m in inside:
+            local = source_start + max(0.0, _at(m) - origin)
+            ET.SubElement(
+                parent,
+                "chapter-marker",
+                {
+                    "start": _fcp_time(local, state.fps),
+                    "duration": _fcp_time(frame, state.fps),
+                    "value": str(m.get("name") or "marker"),
+                },
+            )
+        pending = [m for m in pending if m not in inside]
+
+    def _gap(lo: float, hi: float) -> None:
+        gap = ET.SubElement(
+            spine,
+            "gap",
+            {
+                "name": "Gap",
+                "offset": _fcp_time(lo, state.fps),
+                "duration": _fcp_time(hi - lo, state.fps),
+                "start": "0s",
+            },
+        )
+        _place(gap, lo, hi, lo, 0.0)
+
+    cursor = 0.0
     for ev in sorted(primary, key=lambda e: e["start_seconds"]):
+        clip_start = float(ev["start_seconds"])
+        clip_end = clip_start + float(ev["length_seconds"])
+        lo = clip_start
+        if clip_start - cursor >= frame / 2:
+            # Empty time before this clip: a gap holds it, and any markers in it.
+            _gap(cursor, clip_start)
+        elif clip_start > cursor:
+            lo = cursor  # sub-frame hole: its markers go on this clip's first frame
         ref = assets.get(ev.get("media_path") or "")
         attrib = {
             "name": ev.get("name") or "clip",
@@ -735,22 +784,12 @@ def to_fcpxml(state: OtioBackend) -> str:
         else:
             clip = ET.SubElement(spine, "title", attrib)
             ET.SubElement(clip, "text").text = ev.get("name") or ""
-        clip_start = float(ev["start_seconds"])
-        clip_end = clip_start + float(ev["length_seconds"])
-        inside = [m for m in pending if clip_start <= float(m.get("at_seconds") or 0) < clip_end]
-        for m in inside:
-            # Marker start is in the clip's own source time.
-            local = float(ev.get("take_offset_seconds") or 0) + float(m.get("at_seconds") or 0) - clip_start
-            ET.SubElement(
-                clip,
-                "chapter-marker",
-                {
-                    "start": _fcp_time(local, state.fps),
-                    "duration": _fcp_time(1.0 / state.fps, state.fps),
-                    "value": str(m.get("name") or "marker"),
-                },
-            )
-        pending = [m for m in pending if m not in inside]
+        # Marker start is in the clip's own source time.
+        _place(clip, lo, clip_end, clip_start, float(ev.get("take_offset_seconds") or 0))
+        cursor = max(cursor, clip_end)
+    if pending:
+        # Markers past the last primary clip (or on an empty spine) go on a trailing gap.
+        _gap(cursor, max(_at(m) for m in pending) + frame)
     return _xml(fcpxml, doctype='<!DOCTYPE fcpxml>')
 
 
@@ -885,7 +924,7 @@ def to_xmeml(state: OtioBackend) -> str:
             files[path] = fid
             file_el = ET.SubElement(item, "file", {"id": fid})
             ET.SubElement(file_el, "name").text = os.path.basename(path) or "media"
-            url = path if path.startswith("file:") else "file://" + quote(os.path.abspath(path).replace("\\", "/"), safe="/:")
+            url = _file_url(path)
             ET.SubElement(file_el, "pathurl").text = url
             _xmeml_rate(file_el, fps)
             file_media = ET.SubElement(file_el, "media")
@@ -899,6 +938,27 @@ def to_xmeml(state: OtioBackend) -> str:
         ET.SubElement(marker, "in").text = str(int(round(float(m.get("at_seconds") or 0) * fps)))
         ET.SubElement(marker, "out").text = "-1"
     return _xml(root, doctype="<!DOCTYPE xmeml>")
+
+
+_WIN_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _file_url(path: str) -> str:
+    """A ``file://`` URL for a media path: ``/a/b`` -> ``file:///a/b``, ``C:\\a`` -> ``file:///C:/a``.
+
+    Windows paths are kept as written even when running on POSIX. UNC paths
+    (``\\\\host\\share\\a``) become ``file://host/share/a``.
+    """
+    if path.startswith("file:"):
+        return path
+    unc = path.startswith("\\\\") or (os.name == "nt" and path.startswith("//"))
+    p = path if unc or _WIN_DRIVE.match(path) else os.path.abspath(path)
+    p = p.replace("\\", "/")
+    if unc:
+        return "file:" + quote(p, safe="/:")
+    if not p.startswith("/"):
+        p = "/" + p
+    return "file://" + quote(p, safe="/:")
 
 
 def _fcp_time(seconds: float, fps: float) -> str:

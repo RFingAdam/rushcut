@@ -188,3 +188,75 @@ def test_exports_without_markers_are_unchanged_shape(tmp_path: Path):
     txt = tmp_path / "plain.chapters.txt"
     assert tools.save_project(str(txt))["ok"] is True
     assert txt.read_text(encoding="utf-8") == ""
+
+
+def test_fcpxml_markers_off_primary_clips_land_on_gaps(tmp_path: Path):
+    import xml.etree.ElementTree as ET
+
+    _otio()
+    tools.new_project(discard_unsaved=True)
+    tools.set_project_video(1920, 1080, 30)
+    tools.add_track("video", "V1")
+    tools.add_track("video", "V2")
+    tools.add_video_event(0, str(tmp_path / "a.mp4"), 5.0, 5.0)
+    tools.add_video_event(0, str(tmp_path / "b.mp4"), 15.0, 5.0)
+    tools.add_video_event(1, str(tmp_path / "c.mp4"), 0.0, 3.0)
+    tools.add_marker(1.0, "Before first clip, over V2")
+    tools.add_marker(7.0, "On clip a")
+    tools.add_marker(12.0, "In the hole")
+    tools.add_marker(30.0, "After the end")
+    dest = tmp_path / "gaps.fcpxml"
+    saved = tools.save_project(str(dest))
+    assert saved["ok"] is True
+    spine = ET.parse(dest).getroot().find(".//spine")
+    assert spine is not None
+    layout = [(el.tag, el.get("offset"), el.get("duration")) for el in spine]
+    assert layout == [
+        ("gap", "0/30s", "150/30s"),
+        ("asset-clip", "150/30s", "150/30s"),
+        ("gap", "300/30s", "150/30s"),
+        ("asset-clip", "450/30s", "150/30s"),
+        ("gap", "600/30s", "301/30s"),
+    ]
+    placed = [[(m.get("value"), m.get("start")) for m in el.findall("chapter-marker")] for el in spine]
+    assert placed == [
+        [("Before first clip, over V2", "30/30s")],
+        [("On clip a", "60/30s")],
+        [("In the hole", "60/30s")],
+        [],
+        [("After the end", "300/30s")],
+    ]
+    # Every marker the save reports is in the file.
+    assert saved["markers"] == len(list(spine.iter("chapter-marker"))) == 4
+
+
+def test_media_urls_are_well_formed_file_urls(tmp_path: Path):
+    import xml.etree.ElementTree as ET
+
+    from rushcut.backends.otio import _file_url
+
+    assert _file_url(r"C:\Media\My Clip.mp4") == "file:///C:/Media/My%20Clip.mp4"
+    assert _file_url("D:/Edits/a.mp4") == "file:///D:/Edits/a.mp4"
+    assert _file_url(r"\\nas\share\a.mp4") == "file://nas/share/a.mp4"
+    assert _file_url("/srv/media/a b.mp4") == "file:///srv/media/a%20b.mp4"
+    assert _file_url("file:///already/a.mp4") == "file:///already/a.mp4"
+
+    _otio()
+    tools.new_project(discard_unsaved=True)
+    tools.set_project_video(1920, 1080, 30)
+    tools.add_track("video", "V1")
+    tools.add_video_event(0, r"C:\Media\clip.mp4", 0.0, 2.0)
+    tools.add_video_event(0, str(tmp_path / "posix.mp4"), 2.0, 2.0)
+    xmeml = tmp_path / "u.xmeml"
+    assert tools.save_project(str(xmeml))["ok"] is True
+    urls = [el.text for el in ET.parse(xmeml).getroot().iter("pathurl")]
+    assert urls == ["file:///C:/Media/clip.mp4", "file://" + str(tmp_path / "posix.mp4")]
+    fcp = tmp_path / "u.fcpxml"
+    assert tools.save_project(str(fcp))["ok"] is True
+    srcs = [el.get("src") for el in ET.parse(fcp).getroot().iter("asset")]
+    assert srcs[0] == "file:///C:/Media/clip.mp4"
+    otio = tmp_path / "u.otio"
+    assert tools.save_project(str(otio))["ok"] is True
+    clips = json.loads(otio.read_text(encoding="utf-8"))["tracks"]["children"][0]["children"]
+    refs = [c["media_reference"]["target_url"] for c in clips if c["OTIO_SCHEMA"] == "Clip.1"]
+    assert refs[0] == "file:///C:/Media/clip.mp4"
