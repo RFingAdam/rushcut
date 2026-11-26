@@ -21,6 +21,7 @@ from .region import detect_region_presence
 from .scenes import detect_scenes
 from .session import lookup_session_time, repair_media, stitch_session
 from .speakers import attribute_speakers
+from .thumbnails import pick_thumbnail_frames
 from .transcript import analyze_transcript, attach_speakers, speech_spans_from_words
 from .whisper import transcribe_media
 
@@ -49,6 +50,7 @@ __all__ = [
     "measure_pacing",
     "mix_audio",
     "normalize_audio",
+    "pick_thumbnail_frames",
     "pacing_from_words",
     "probe_media",
     "reframe_media",
