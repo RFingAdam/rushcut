@@ -55,14 +55,14 @@ def _nice(cmd: list[str]) -> list[str]:
 
 def _run_bytes(cmd: list[str], timeout: float) -> tuple[bytes, str]:
     try:
-        p = subprocess.run(_nice(cmd), capture_output=True, timeout=timeout)
+        p = subprocess.run(_nice(cmd), capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as exc:
         raise FfmpegError(f"Timed out after {timeout:.0f}s: {cmd[0]}") from exc
     return p.stdout, p.stderr.decode("utf-8", "replace")
 
 
 def _ffprobe(path: str, args: list[str], timeout: float = 60) -> str:
-    cmd = [which_ffmpeg("ffprobe"), "-v", "error", *args, path]
+    cmd = [which_ffmpeg("ffprobe"), "-v", "error", *args, "-i", path]
     out, _ = _run_bytes(cmd, timeout)
     return out.decode("utf-8", "replace")
 
@@ -121,7 +121,7 @@ def _stream_info(path: str) -> dict[str, Any]:
 def _decode_audio(path: str, upto: float | None, stream: int, timeout: float) -> Any:
     """Mono 16 kHz float samples from t=0 (``-t`` only, never ``-ss``)."""
     np = _np()
-    cmd = [which_ffmpeg("ffmpeg"), "-v", "error", "-i", path, "-map", f"0:a:{stream}", "-ac", "1", "-ar", str(SR)]
+    cmd = [which_ffmpeg("ffmpeg"), "-nostdin", "-v", "error", "-i", path, "-map", f"0:a:{stream}", "-ac", "1", "-ar", str(SR)]
     if upto is not None:
         cmd += ["-t", f"{upto:.3f}"]
     cmd += ["-f", "f32le", "-"]
@@ -191,6 +191,8 @@ def _audio_check(
     points = []
     for t in times:
         c0 = int(round((t - c_start) * SR))
+        if c0 < 0:  # a negative index would slice the END of the file
+            continue
         c = cand[c0: c0 + int(window * SR)]
         r0 = int(round((source_start + t - s_start) * SR)) - margin
         r = ref[max(r0, 0): r0 + len(c) + 2 * margin]
@@ -220,7 +222,7 @@ def _frames(path: str, ss: float, span: float, size: tuple[int, int], fps: float
     np = _np()
     w, h = size
     vf = (f"fps={fps}," if fps else "") + f"scale={w}:{h}:flags=area,format=gray,showinfo"
-    cmd = [which_ffmpeg("ffmpeg"), "-v", "info", "-nostats", "-ss", f"{max(ss, 0):.4f}", "-t", f"{span:.4f}", "-copyts",
+    cmd = [which_ffmpeg("ffmpeg"), "-nostdin", "-v", "info", "-nostats", "-ss", f"{max(ss, 0):.4f}", "-t", f"{span:.4f}", "-copyts",
            "-i", path, "-map", "0:v:0", "-vf", vf, "-fps_mode", "passthrough", "-f", "rawvideo", "-"]
     out, err = _run_bytes(cmd, timeout)
     pts = [float(m) for m in re.findall(r"pts_time:\s*(-?[0-9.]+)", err)]

@@ -215,6 +215,7 @@ def _build_parser() -> argparse.ArgumentParser:
     audit.add_argument("folder")
     audit.add_argument("--tail", type=float, default=20.0, dest="tail_seconds")
     audit.add_argument("--end-mismatch-ms", type=float, default=100.0)
+    audit.add_argument("--start-skew-ms", type=float, default=100.0)
     audit.add_argument("--workers", type=int, default=2)
 
     stitch = sub.add_parser(
@@ -560,6 +561,7 @@ def _cmd_tape_audit(args: argparse.Namespace) -> int:
         args.folder,
         tail_seconds=args.tail_seconds,
         end_mismatch_ms=args.end_mismatch_ms,
+        start_skew_ms=args.start_skew_ms,
         workers=args.workers,
     )
     _print_json(result)
