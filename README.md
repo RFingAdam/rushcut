@@ -162,7 +162,7 @@ A ready-made agent skill that explains the typical tool flow lives in
 
 ## Tool catalog
 
-102 tools, generated from the server's registered tool list. Tool names are
+104 tools, generated from the server's registered tool list. Tool names are
 stable across backends; unsupported calls return `{"ok": false, ...}` with a
 reason instead of raising.
 
@@ -178,7 +178,7 @@ reason instead of raising.
 | Transport, live NLEs only (3) | `transport_play`, `transport_stop`, `transport_seek` |
 | Render and delivery (11) | `list_render_templates`, `render_start`, `render_status`, `wait_for_render`, `render_with_preset`, `verify_output`, `write_edit_sidecar`, `export_review_pack`, `pick_frame`, `compose_thumbnail`, `frame_check` |
 | Analysis, no NLE needed (12) | `probe_media`, `detect_scenes`, `analyze_audio`, `score_hook`, `analyze_noise_floor`, `transcribe_media`, `stitch_session`, `session_lookup`, `detect_region_presence`, `repair_media`, `file_still_writing`, `attribute_speakers` |
-| Quality, no NLE needed (8) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap` |
+| Quality, no NLE needed (10) | `check_output`, `validate_profile`, `check_loop`, `check_media`, `check_seams`, `snap_cuts`, `check_speed_ramps`, `fits_cap`, `verify_sync`, `tape_audit` |
 | Captions, no NLE needed (2) | `generate_captions`, `burn_captions` |
 | Story formats and pacing, no NLE needed (4) | `list_story_formats`, `plan_story_edit`, `chapters_from_beats`, `measure_pacing` |
 | File-level FFmpeg ops, no NLE needed (16) | `cut_media`, `concat_media`, `reframe_media`, `mix_audio`, `normalize_audio`, `add_music_bed`, `bleep_spans`, `insert_audio`, `replace_audio_span`, `loop_fades`, `master_audio`, `audio_cleanup`, `blur_media`, `compose_layout`, `track_circle`, `make_text_card` |
@@ -219,6 +219,43 @@ I/O errors. `--mode strict|warn|off` overrides `quality.gate` in the profile.
 
 The same checks are the MCP tool `check_output`. `render_with_preset` also
 runs them when `edit_meta.profile` is set.
+
+### A/V sync and recording audits
+
+`verify_sync` (MCP tool and `rushcut verify-sync`) measures how far a file sits
+from a reference, in audio and in picture, and the resulting A/V offset.
+FFmpeg plus numpy (`pip install 'rushcut-mcp[analysis]'`); no NLE.
+
+```bash
+# whole-file stream copy or render of SOURCE
+rushcut verify-sync render.mkv --source source.mkv
+# a window that starts 600 s into the source; sample at 2 s, 60 s and 118 s of the window
+rushcut verify-sync window.mkv --source source.mkv --source-start 600 --points 2,60,118
+```
+
+- Audio: the whole needed range is decoded once and sliced by sample, then
+  band-limited cross-correlated against the source (16 kHz, 0.06 ms steps).
+  It never seeks with `-ss`, whose error is the quantity being measured. The
+  source is decoded from t=0 up to the last sample point, so long sources cost time.
+- Picture: decoded frames are matched by signature using the decoder's real
+  frame times, not `n/fps`. A stream-copied picture decodes bit-identically
+  (`exact_frame`); a re-encode matches closely (`near_frame`); if neither,
+  motion-energy correlation is used and labelled `motion_xcorr`.
+- Output: per-point lags, `audio.lag_ms`, `picture.lag_ms`, `av_offset_ms`
+  (picture minus audio, positive = picture late against sound), `audio.drift_ms`
+  across the points, and `findings`. Positive always means later than the source.
+  Exit code 2 when a tolerance is exceeded.
+- Without `--source` it reports container facts only.
+
+`tape_audit` (`rushcut tape-audit FOLDER`) scans every recording in a folder
+without decoding: it reads the first packets and the last `--tail` seconds of
+packet timestamps per stream, and flags audio ending away from video, A/V start
+skew, unreadable duration (unfinalized files) and video timestamp gaps (dropped
+frames) in the tail. It runs `nice`d, with 2 probe workers by default.
+
+Stitching pieces together with `n/fps` instead of real packet timestamps drifts
+about 1 ms per piece; `verify_sync` points at the first and last piece so the
+drift shows up as `audio.drift_ms` or a growing `picture.lag_ms`.
 
 ### Speech boundaries
 

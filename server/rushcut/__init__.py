@@ -947,6 +947,58 @@ def check_loop(
 
 
 @mcp.tool()
+def verify_sync(
+    video: str,
+    source: str | None = None,
+    source_start: float = 0.0,
+    points: list[float] | None = None,
+    window_seconds: float = 5.0,
+    max_lag_ms: float = 250.0,
+    audio_stream: int = 0,
+    audio_tolerance_ms: float = 5.0,
+    av_tolerance_ms: float = 20.0,
+    check_video: bool = True,
+) -> dict:
+    """Audio/video offset of a file against a reference: sample-accurate audio cross-correlation plus exact-frame picture matching for stream-copied video (motion correlation otherwise). source_start is where the video begins on the source timeline. Positive = later than the source."""
+    from .quality.sync import verify_sync as _verify
+
+    return _verify(
+        video,
+        source=source,
+        source_start=source_start,
+        points=points,
+        window_seconds=window_seconds,
+        max_lag_ms=max_lag_ms,
+        audio_stream=audio_stream,
+        audio_tolerance_ms=audio_tolerance_ms,
+        av_tolerance_ms=av_tolerance_ms,
+        check_video=check_video,
+    )
+
+
+@mcp.tool()
+def tape_audit(
+    folder: str,
+    tail_seconds: float = 20.0,
+    end_mismatch_ms: float = 100.0,
+    start_skew_ms: float = 100.0,
+    workers: int = 2,
+    extensions: list[str] | None = None,
+) -> dict:
+    """Cheap scan of a recording folder (packet timestamps only, no decode): audio ending away from video, start skew, unfinalized files and video timestamp gaps (dropped frames)."""
+    from .quality.sync import tape_audit as _audit
+
+    return _audit(
+        folder,
+        tail_seconds=tail_seconds,
+        end_mismatch_ms=end_mismatch_ms,
+        start_skew_ms=start_skew_ms,
+        workers=workers,
+        extensions=extensions,
+    )
+
+
+@mcp.tool()
 def check_media(
     path: str,
     cuts: dict[str, Any] | list | str | None = None,
