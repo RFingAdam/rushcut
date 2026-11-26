@@ -21,6 +21,26 @@ SIDECAR_KEYS = (
 )
 
 
+# Version 2 adds ``timeline``: the whole edit.json document, re-renderable
+# with ``apply_timeline(<sidecar>)``. Version-1 readers keep working off the
+# top-level ``edit`` / ``segments`` / ``output`` / ``join_fade_ms`` keys.
+SIDECAR_VERSION = 2
+
+# Keys a sidecar adds around the timeline; never part of the edit document.
+_SIDECAR_ONLY_KEYS = frozenset(
+    {
+        "ok",
+        "output_path",
+        "written_at",
+        "edit",
+        "extra",
+        "sidecar_path",
+        "sidecar_version",
+        "timeline",
+    }
+)
+
+
 def sidecar_path(output_path: str) -> str:
     return output_path + ".edit.json"
 
@@ -108,6 +128,95 @@ def _head_black_s(path: str, probe: dict[str, Any], luma_max: float = 16.0) -> f
     return black
 
 
+def moov_before_mdat(path: str) -> bool | None:
+    """True when the top-level ``moov`` box precedes ``mdat`` (faststart).
+
+    ``None`` when the file is not ISO-BMFF or the boxes cannot be walked.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            offset = 0
+            while offset + 8 <= size:
+                fh.seek(offset)
+                header = fh.read(16)
+                if len(header) < 8:
+                    return None
+                box_size = int.from_bytes(header[:4], "big")
+                kind = header[4:8]
+                if box_size == 1:
+                    if len(header) < 16:
+                        return None
+                    box_size = int.from_bytes(header[8:16], "big")
+                elif box_size == 0:
+                    box_size = size - offset
+                if kind == b"moov":
+                    return True
+                if kind == b"mdat":
+                    return False
+                if box_size < 8:
+                    return None
+                offset += box_size
+    except OSError:
+        return None
+    return None
+
+
+def _norm_codec(name: Any) -> str:
+    text = str(name or "").lower()
+    return {"avc": "h264", "avc1": "h264", "x264": "h264", "libx264": "h264"}.get(text, text)
+
+
+def fps_matches(actual: float, expected: float, tolerance: float = 0.01) -> bool:
+    """True when ``actual`` is ``expected`` or its NTSC rate (x 1000/1001).
+
+    VEGAS and Resolve render 29.97 / 59.94 by default, so a 30 or 60 fps
+    preset accepts those too. Default chosen here; tighten if exact rates
+    are required.
+    """
+    ntsc = expected * 1000.0 / 1001.0
+    return abs(actual - expected) < tolerance or abs(actual - ntsc) < tolerance
+
+
+def _preset_checks(
+    path: str,
+    probe: dict[str, Any],
+    expect: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Per-field results for ``verify_output(preset=...)``."""
+    checks: dict[str, dict[str, Any]] = {}
+
+    def add(key: str, expected: Any, actual: Any, ok: bool) -> None:
+        checks[key] = {"ok": bool(ok), "expected": expected, "actual": actual}
+
+    if "width" in expect:
+        actual = int(probe.get("width") or 0) or None
+        add("width", expect["width"], actual, actual == expect["width"])
+    if "height" in expect:
+        actual = int(probe.get("height") or 0) or None
+        add("height", expect["height"], actual, actual == expect["height"])
+    if "fps" in expect:
+        fps = probe.get("fps")
+        actual_fps = round(float(fps), 3) if fps else None
+        add("fps", expect["fps"], actual_fps, actual_fps is not None and fps_matches(actual_fps, float(expect["fps"])))
+    if "video_codec" in expect:
+        actual = probe.get("video_codec")
+        add("video_codec", expect["video_codec"], actual, _norm_codec(actual) == expect["video_codec"])
+    if "pix_fmt" in expect:
+        actual = probe.get("pix_fmt")
+        add("pix_fmt", expect["pix_fmt"], actual, actual == expect["pix_fmt"])
+    if "audio_codec" in expect:
+        actual = probe.get("audio_codec")
+        add("audio_codec", expect["audio_codec"], actual, _norm_codec(actual) == expect["audio_codec"])
+    if "sample_rate" in expect:
+        actual = probe.get("sample_rate")
+        add("sample_rate", expect["sample_rate"], actual, actual == expect["sample_rate"])
+    if expect.get("faststart"):
+        actual = moov_before_mdat(path)
+        add("faststart", True, actual, actual is True)
+    return checks
+
+
 def verify_output(
     path: str,
     *,
@@ -120,6 +229,7 @@ def verify_output(
     decode_timeout: float | None = None,
     measure_loudness: bool = False,
     measure_head_black: bool = False,
+    preset: str | None = None,
 ) -> dict[str, Any]:
     """ffprobe + optional full-decode QA.
 
@@ -127,8 +237,33 @@ def verify_output(
     false when the moov atom is missing or the decode reports errors, even
     if the other expectation checks pass. Duration mismatches vs
     ``expect_duration`` also set ``ok`` false.
+
+    ``preset`` names a render preset (``render/presets.py``). Its size fills
+    ``expect_width`` / ``expect_height`` when those are not passed; delivery
+    presets (``vertical_30`` / ``hd_30`` / ``hd_60`` / ``uhd``) also check
+    fps, video codec, pix_fmt, audio codec, sample rate and faststart.
+    Per-field results come back in ``preset_checks``; any failure sets
+    ``ok`` false and adds a ``preset <field>: ...`` problem.
     """
     from .atomic import count_decode_errors, file_md5, has_moov_atom
+    from .presets import RENDER_PRESETS, preset_expectations
+
+    preset_expect = None
+    if preset:
+        preset_expect = preset_expectations(preset)
+        if preset_expect is None:
+            return {
+                "ok": False,
+                "path": os.path.abspath(path),
+                "error": f"unknown preset {preset!r}; use {', '.join(RENDER_PRESETS)}",
+                "problems": [f"unknown preset {preset!r}"],
+                "preset": preset,
+            }
+        # Width/height are checked once, in preset_checks.
+        if expect_width == preset_expect["width"]:
+            expect_width = None
+        if expect_height == preset_expect["height"]:
+            expect_height = None
 
     probe = probe_media(path)
     md5 = file_md5(path)
@@ -172,6 +307,9 @@ def verify_output(
             probe.get("stream_max_duration_seconds") or probe.get("duration_seconds") or 0
         )
         result.update(extras)
+        if preset_expect is not None:
+            result["preset"] = preset.lower() if preset else None
+            result["preset_checks"] = {}
         return result
     if expect_audio and not probe.get("has_audio"):
         problems.append("no audio stream")
@@ -179,6 +317,12 @@ def verify_output(
         problems.append(f"width {probe.get('width')} != {expect_width}")
     if expect_height and int(probe.get("height") or 0) != expect_height:
         problems.append(f"height {probe.get('height')} != {expect_height}")
+    preset_checks: dict[str, dict[str, Any]] | None = None
+    if preset_expect is not None:
+        preset_checks = _preset_checks(path, probe, preset_expect)
+        for key, check in preset_checks.items():
+            if not check["ok"]:
+                problems.append(f"preset {key}: {check['actual']} != {check['expected']}")
     duration = float(probe.get("stream_max_duration_seconds") or probe.get("duration_seconds") or 0)
     if expect_duration is not None:
         if abs(duration - expect_duration) > duration_tolerance:
@@ -207,7 +351,7 @@ def verify_output(
             extras["head_black_s"] = _head_black_s(path, probe)
         except Exception:  # noqa: BLE001 — head-black is optional QA
             extras["head_black_s"] = None
-    return {
+    out: dict[str, Any] = {
         "ok": not problems,
         "path": probe.get("path"),
         "probe": probe,
@@ -218,6 +362,30 @@ def verify_output(
         "duration_seconds": duration,
         **extras,
     }
+    if preset_checks is not None:
+        out["preset"] = preset.lower() if preset else None
+        out["preset_checks"] = preset_checks
+    return out
+
+
+def _timeline_document(timeline: Any) -> dict[str, Any] | None:
+    """A JSON-safe copy of the edit document to store under ``timeline``.
+
+    Accepts a plain edit.json dict, or a sidecar (its own ``timeline`` wins),
+    and drops the sidecar's wrapper keys so re-rendering a sidecar does not
+    nest metadata.
+    """
+    if not isinstance(timeline, dict):
+        return None
+    inner = timeline.get("timeline")
+    if isinstance(inner, dict) and isinstance(inner.get("segments"), list):
+        timeline = inner
+    if not isinstance(timeline.get("segments"), list) or not timeline["segments"]:
+        return None
+    doc = {k: v for k, v in timeline.items() if k not in _SIDECAR_ONLY_KEYS}
+    doc.setdefault("schema", "rushcut.edit/v1")
+    copied: dict[str, Any] = json.loads(json.dumps(doc, default=str))
+    return copied
 
 
 def write_sidecar(
@@ -226,9 +394,23 @@ def write_sidecar(
     extra: dict[str, Any] | None = None,
     timeline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Write ``<output>.edit.json``.
+
+    ``timeline`` is the edit.json document that produced (or reproduces) the
+    output. When given, the whole document is stored under ``timeline`` so
+    ``apply_timeline(<sidecar path>)`` re-renders it; ``segments`` /
+    ``output`` / ``join_fade_ms`` / ``effects`` stay at the top level for
+    older readers. ``edit_meta["timeline"]`` is used when ``timeline`` is
+    not passed.
+    """
     refused = check_output_path(output_path)
     if refused:
         return refused
+    if timeline is None and isinstance(edit_meta, dict) and isinstance(edit_meta.get("timeline"), dict):
+        timeline = edit_meta["timeline"]
+    full_timeline = _timeline_document(timeline)
+    if full_timeline is not None:
+        timeline = full_timeline
     meta = {k: (edit_meta or {}).get(k) for k in SIDECAR_KEYS}
     # Accept a few aliases from callers.
     if meta["length"] is None:
@@ -247,8 +429,9 @@ def write_sidecar(
             meta["effects"] = timeline.get("effects")
         if timeline.get("schema"):
             meta["schema"] = timeline.get("schema")
-    payload = {
+    payload: dict[str, Any] = {
         "ok": True,
+        "sidecar_version": SIDECAR_VERSION,
         "output_path": os.path.abspath(output_path),
         "written_at": datetime.now(timezone.utc).isoformat(),
         "edit": meta,
@@ -260,6 +443,8 @@ def write_sidecar(
         payload["join_fade_ms"] = timeline.get("join_fade_ms")
         if timeline.get("effects"):
             payload["effects"] = timeline["effects"]
+    if full_timeline is not None:
+        payload["timeline"] = full_timeline
     if extra:
         payload["extra"] = extra
     dest = sidecar_path(output_path)

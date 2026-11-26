@@ -9,7 +9,8 @@ from ..analysis.ffmpeg_util import encode_timeout_seconds, run, which_ffmpeg
 from ..analysis.probe import probe_media
 from ..output_policy import check_output_path, make_work_dir
 from ..render.atomic import run_ffmpeg_atomic
-from ..render.sidecar import verify_output, write_sidecar
+from ..render.presets import delivery_ffmpeg_args, delivery_preset
+from ..render.sidecar import fps_matches, verify_output, write_sidecar
 from .filters import (
     atempo_chain,
     blur_filter_complex,
@@ -625,15 +626,13 @@ def apply_edit(
             if not result.get("ok"):
                 return result
             current = gdest
-        atomic = run_ffmpeg_atomic(
-            [
-                which_ffmpeg("ffmpeg"),
-                "-hide_banner",
-                "-y",
-                "-i",
-                current,
-                "-t",
-                f"{expected:.6f}",
+        delivery = delivery_preset(out.get("preset"))
+        if delivery is not None:
+            # Segments are already at output size/fps, so no -vf here.
+            encode_args = delivery_ffmpeg_args(delivery["name"], video_filter=False)
+            x264_preset = str(delivery["x264_preset"])
+        else:
+            encode_args = [
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -646,9 +645,21 @@ def apply_edit(
                 "48000",
                 "-ac",
                 "2",
+            ]
+            x264_preset = "ultrafast"
+        atomic = run_ffmpeg_atomic(
+            [
+                which_ffmpeg("ffmpeg"),
+                "-hide_banner",
+                "-y",
+                "-i",
+                current,
+                "-t",
+                f"{expected:.6f}",
+                *encode_args,
             ],
             dest,
-            timeout=encode_timeout_seconds(expected, width=width, height=height, fps=fps, preset="ultrafast"),
+            timeout=encode_timeout_seconds(expected, width=width, height=height, fps=fps, preset=x264_preset),
             verify_kwargs={"expect_audio": True, "expect_duration": expected, "duration_tolerance": 1.0 / max(fps, 1.0) + 0.02},
         )
         if not atomic.get("ok"):
@@ -657,6 +668,15 @@ def apply_edit(
             atomic = {"ok": True, "output_path": dest, "verify": verify_output(dest, expect_duration=expected, duration_tolerance=1.0 / max(fps, 1.0))}
         probe = probe_media(dest)
         duration = float(probe.get("duration_seconds") or 0)
+        preset_verify = None
+        if (
+            delivery is not None
+            and (width, height) == (delivery["width"], delivery["height"])
+            and fps_matches(fps, float(delivery["fps"]))
+        ):
+            preset_verify = verify_output(
+                dest, preset=delivery["name"], expect_audio=False, decode=False
+            )
         sidecar = None
         if write_sidecar_file:
             sidecar = write_sidecar(
@@ -677,6 +697,8 @@ def apply_edit(
             )
         frame_tol = 1.0 / max(fps, 1.0)
         ok = abs(duration - expected) <= frame_tol + 0.02
+        if preset_verify is not None and not preset_verify.get("ok"):
+            ok = False
         return {
             "ok": bool(ok and (atomic.get("ok") if isinstance(atomic, dict) else True)),
             "output_path": os.path.abspath(dest),
@@ -690,6 +712,8 @@ def apply_edit(
             "sidecar_path": None if not sidecar else sidecar.get("sidecar_path"),
             "sidecar": sidecar,
             "verify": atomic.get("verify") if isinstance(atomic, dict) else None,
+            "preset": out.get("preset"),
+            "preset_checks": None if preset_verify is None else preset_verify.get("preset_checks"),
             "backend": "ffmpeg",
         }
     finally:

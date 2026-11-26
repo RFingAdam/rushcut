@@ -1060,11 +1060,16 @@ def render_with_preset(
     edit_meta: dict[str, Any] | None = None,
     wait: bool = True,
     master: bool | None = None,
+    timeline: dict[str, Any] | None = None,
 ) -> dict:
-    """Named preset (vertical / 1080p / 4k): async render, ffprobe verify, sidecar JSON.
+    """Named preset: async render, ffprobe verify, sidecar JSON.
 
+    Size presets: vertical / 1080p / 4k. MP4 delivery presets with fixed
+    x264 CRF 19 / AAC 192k 48 kHz / faststart args: vertical_30, hd_30,
+    hd_60, uhd (checked field by field in verify.preset_checks).
     Pass master=true (or set master: true on the preset) to run two-pass
-    master_audio on the rendered file.
+    master_audio on the rendered file. Pass timeline (edit.json) to store
+    it in the sidecar for apply_timeline re-renders.
     """
     return tools.render_with_preset(
         output_path,
@@ -1074,6 +1079,7 @@ def render_with_preset(
         edit_meta=edit_meta,
         wait=wait,
         master=master,
+        timeline=timeline,
     )
 
 
@@ -1085,8 +1091,13 @@ def verify_output(
     expect_audio: bool = True,
     expect_duration: float | None = None,
     duration_tolerance: float = 0.6,
+    preset: str | None = None,
 ) -> dict:
-    """ffprobe + full-decode check (moov_ok, decode_errors, md5, fps_exact, LUFS)."""
+    """ffprobe + full-decode check (moov_ok, decode_errors, md5, fps_exact, LUFS).
+
+    preset (e.g. vertical_30 / hd_60) checks size, fps, codecs, pix_fmt,
+    sample rate and faststart; per-field results in preset_checks.
+    """
     from .render.sidecar import verify_output as _verify
 
     return _verify(
@@ -1098,6 +1109,7 @@ def verify_output(
         duration_tolerance=duration_tolerance,
         measure_loudness=True,
         measure_head_black=True,
+        preset=preset,
     )
 
 
@@ -1319,7 +1331,11 @@ def write_edit_sidecar(
     edit_meta: dict[str, Any] | None = None,
     timeline: dict[str, Any] | None = None,
 ) -> dict:
-    """Write <output>.edit.json (metadata + optional full timeline for apply_timeline)."""
+    """Write <output>.edit.json (metadata + optional full timeline for apply_timeline).
+
+    The whole timeline document is stored under "timeline"; pass the
+    sidecar path back to apply_timeline to re-render it.
+    """
     from .render.sidecar import write_sidecar
 
     return write_sidecar(output_path, edit_meta, timeline=timeline)

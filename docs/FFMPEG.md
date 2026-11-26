@@ -81,6 +81,22 @@ Render templates advertised by this backend are ffmpeg size presets
 (`Vertical 1080x1920`, `Internet HD 1080p`, `4K UHD`) so
 `render_with_preset` works the same way as on VEGAS and Resolve.
 
+Delivery presets (`vertical_30`, `hd_30`, `hd_60`, `uhd`) compose the
+timeline at the preset size and frame rate, then encode the final file
+with the preset's exact args (`render/presets.py`):
+
+```
+-vf scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=F
+-c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p
+-c:a aac -b:a 192k -ar 48000 -ac 2 -movflags +faststart
+```
+
+`render_with_preset` then runs `verify_output(preset=...)`, which checks
+width, height, fps, h264, yuv420p, AAC, 48 kHz and faststart, and fails
+the call if any field is off. With `master=true` the file is mastered
+(AAC 192k at the source's 48 kHz, video stream-copied) and then remuxed
+with `+faststart`.
+
 Pass `master=true` (or set `master: true` on a preset) to run
 `master_audio` on the rendered file. Defaults are -14 LUFS integrated,
 -1.5 dBTP, LRA 11. The two-pass loudnorm + limiter path is pure ffmpeg.

@@ -13,10 +13,23 @@ import uuid
 from typing import Any
 
 from ..analysis.captions import burn_captions
-from ..analysis.ffmpeg_util import FfmpegError, bind_job_process, run, which_ffmpeg
+from ..analysis.ffmpeg_util import (
+    FfmpegError,
+    bind_job_process,
+    encode_timeout_seconds,
+    run,
+    which_ffmpeg,
+)
 from ..analysis.probe import probe_media
 from ..output_policy import check_output_path, make_work_dir
 from ..render.atomic import InterruptedRender, JobProcess, mux_to_partial
+from ..render.presets import (
+    DELIVERY_PRESETS,
+    delivery_ffmpeg_args,
+    delivery_preset,
+    delivery_rate,
+    delivery_video_filter,
+)
 from .otio import OtioBackend
 from .protocol import capability_sheet, fail, ok, unsupported
 
@@ -289,7 +302,18 @@ class FfmpegBackend:
         height = int(state.get("height") or 1080)
         fps = float(state.get("fps") or 24.0)
         template_name = (p.get("template_name") or "").lower()
-        if "1080x1920" in template_name or "vertical" in template_name or "9:16" in template_name:
+        delivery = delivery_preset(p.get("delivery_preset"))
+        if p.get("delivery_preset") and delivery is None:
+            return fail(
+                f"unknown delivery_preset {p.get('delivery_preset')!r}; "
+                f"use {', '.join(DELIVERY_PRESETS)}",
+                editor=self.name,
+            )
+        if delivery is not None:
+            width, height = int(delivery["width"]), int(delivery["height"])
+            # A 29.97 / 59.94 project stays NTSC; anything else goes to 30 / 60.
+            fps = delivery_rate(delivery["name"], fps)[0]
+        elif "1080x1920" in template_name or "vertical" in template_name or "9:16" in template_name:
             width, height = 1080, 1920
         elif "3840" in template_name or "4k" in template_name or "2160" in template_name:
             width, height = 3840, 2160
@@ -319,13 +343,23 @@ class FfmpegBackend:
             if not program:
                 return fail("nothing to render (no events)", editor=self.name)
             caption = p.get("ass_path") or p.get("caption_path")
-            if caption and os.path.isfile(str(caption)):
+            has_caption = bool(caption and os.path.isfile(str(caption)))
+            if delivery is not None:
+                self._deliver(
+                    program,
+                    output_path,
+                    delivery,
+                    duration,
+                    ass_path=str(caption) if has_caption else None,
+                    source_fps=fps,
+                )
+            elif has_caption:
                 burned = burn_captions(program, str(caption), output_path)
                 if not burned.get("ok"):
                     return burned
             else:
                 mux_to_partial(program, output_path, copy=True)
-            return ok(
+            out = ok(
                 output_path=os.path.abspath(p.get("final_path") or output_path),
                 partial_path=os.path.abspath(output_path),
                 width=width,
@@ -333,12 +367,50 @@ class FfmpegBackend:
                 duration_seconds=duration,
                 editor=self.name,
             )
+            if delivery is not None:
+                out["delivery_preset"] = delivery["name"]
+                out["fps"] = fps
+            return out
         except InterruptedRender:
             raise
         except FfmpegError as exc:
             return fail(str(exc), editor=self.name)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def _deliver(
+        self,
+        program: str,
+        dest: str,
+        delivery: dict[str, Any],
+        duration: float,
+        *,
+        ass_path: str | None = None,
+        source_fps: float | None = None,
+    ) -> None:
+        """Final encode with the delivery preset's exact ffmpeg args.
+
+        ``source_fps`` is the program's rate, so an NTSC program keeps it.
+        """
+        name = delivery["name"]
+        cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-y", "-i", program]
+        if ass_path:
+            ass_esc = ass_path.replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
+            cmd.extend(["-vf", f"{delivery_video_filter(name, source_fps)},ass='{ass_esc}'"])
+            cmd.extend(delivery_ffmpeg_args(name, video_filter=False))
+        else:
+            cmd.extend(delivery_ffmpeg_args(name, source_fps=source_fps))
+        cmd.append(dest)
+        run(
+            cmd,
+            timeout=encode_timeout_seconds(
+                duration,
+                width=int(delivery["width"]),
+                height=int(delivery["height"]),
+                fps=float(delivery["fps"]),
+                preset=str(delivery["x264_preset"]),
+            ),
+        )
 
     def _compose_program(
         self,

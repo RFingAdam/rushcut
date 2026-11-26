@@ -19,6 +19,11 @@ OUTPUT_PRESETS = {
     "vertical": (1080, 1920, 30.0),
     "1080p": (1920, 1080, 30.0),
     "4k": (3840, 2160, 30.0),
+    # MP4 delivery presets: exact encode args in render/presets.py.
+    "vertical_30": (1080, 1920, 30.0),
+    "hd_30": (1920, 1080, 30.0),
+    "hd_60": (1920, 1080, 60.0),
+    "uhd": (3840, 2160, 30.0),
 }
 
 
@@ -198,6 +203,14 @@ def _output(raw: Any) -> dict[str, Any]:
 
 
 def _unwrap(data: dict[str, Any]) -> dict[str, Any]:
+    timeline = data.get("timeline")
+    if (
+        data.get("sidecar_version") is not None
+        and isinstance(timeline, dict)
+        and isinstance(timeline.get("segments"), list)
+    ):
+        # A v2+ sidecar: its ``timeline`` is the full edit document.
+        return dict(timeline)
     if isinstance(data.get("segments"), list):
         return data
     edit = data.get("edit")
