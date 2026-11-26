@@ -31,6 +31,8 @@ vegas-director-mcp = "rushcut:main"
 windows = ["pywin32>=306"]
 whisper = ["faster-whisper>=1.0.3"]
 analysis = ["numpy>=1.24", "scipy>=1.10"]
+# read_screen_regions: local tesseract OCR. Also needs the tesseract binary on PATH.
+ocr = ["pytesseract>=0.3.10", "numpy>=1.24"]
 denoise = ["deepfilternet>=0.5"]
 dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10", "numpy>=1.24", "scipy>=1.10"]
 
