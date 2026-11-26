@@ -9,11 +9,20 @@ the same file and params give the same picks every run.
 """
 from __future__ import annotations
 
+import functools
 import os
+import queue
+import re
+import subprocess
+import threading
+from collections import deque
+from collections.abc import Iterator
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from .ffmpeg_util import FfmpegError, run, which_ffmpeg
+from ..output_policy import check_output_path
+from .ffmpeg_util import FfmpegError, run, spawn, which_ffmpeg
 from .probe import probe_media
 from .region import _parse_box
 
@@ -35,6 +44,20 @@ _WEIGHTS = {
     "face": 0.1,
 }
 _INSTALL_HINT = "pip install 'rushcut-mcp[analysis]' (numpy)"
+# Sample k is the first frame at or after start + k/fps. Both the sampler and
+# the PNG seek are shifted back by this much so a frame sitting exactly on a
+# grid point lands in its own sample whatever the float rounding.
+_GRID_EPS = 1e-4
+# The PNG seek lands this far before the scored frame's exact time, so
+# ffmpeg's "first frame at or after" picks that frame (any fps below 2000).
+_SEEK_BACK = 5e-4
+# Each skip region is kept per sample at no more than this many pixels
+# (strided), so overlay checks stay bounded on long recordings.
+_OVERLAY_MAX_PIXELS = 4096
+# Give up when ffmpeg delivers no frame for this long.
+_STALL_SECONDS = 120.0
+_SHOWINFO_TB = re.compile(r"Parsed_showinfo.*config in time_base:\s*(\d+)/(\d+)")
+_SHOWINFO_PTS = re.compile(r"Parsed_showinfo.*\bn:\s*\d+\s+pts:\s*(-?\d+)\s+pts_time:(\S+)")
 
 
 def _try_numpy() -> Any:
@@ -99,16 +122,30 @@ def _text_area(np: Any, grad: Any) -> tuple[float, str]:
     return max(0.0, min(1.0, 1.0 - best_val / mean_all)), best_name
 
 
-def _face_score(frame: Any, width: int, height: int) -> tuple[float, str]:
+@functools.lru_cache(maxsize=1)
+def _face_classifier() -> Any | None:
+    """The Haar face cascade, loaded once per process. ``None`` when unavailable."""
     try:
         import cv2  # type: ignore
     except ImportError:
-        return 0.0, "unavailable"
+        return None
     try:
         cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
         if not os.path.isfile(cascade_path):
-            return 0.0, "unavailable"
+            return None
         classifier = cv2.CascadeClassifier(cascade_path)
+    except (OSError, ValueError, RuntimeError, AttributeError):
+        return None
+    if classifier.empty():
+        return None
+    return classifier
+
+
+def _face_score(frame: Any, width: int, height: int) -> tuple[float, str]:
+    classifier = _face_classifier()
+    if classifier is None:
+        return 0.0, "unavailable"
+    try:
         faces = classifier.detectMultiScale(frame, scaleFactor=1.1, minNeighbors=4, minSize=(16, 16))
     except (OSError, ValueError, RuntimeError):
         return 0.0, "unavailable"
@@ -119,36 +156,137 @@ def _face_score(frame: Any, width: int, height: int) -> tuple[float, str]:
     return min(1.0, biggest / (0.08 * width * height)), "haar"
 
 
-def _read_frames(path: str, start: float, end: float, fps: float, width: int, height: int) -> tuple[bytes, int, int]:
+def _analysis_size(width: int, height: int) -> tuple[int, int]:
     aw = min(_ANALYSIS_WIDTH, width) // 2 * 2
     ah = max(2, int(round(height * aw / float(width))) // 2 * 2)
-    # round=up makes sample k the frame shown at exactly start + k/fps, so the
-    # reported times match what the PNG export (-ss t) grabs.
-    vf = f"fps={fps:.6f}:round=up,scale={aw}:{ah}:flags=area,format=gray"
-    cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
+    return aw, ah
+
+
+def _iter_frames(
+    np: Any, path: str, start: float, end: float, fps: float, aw: int, ah: int
+) -> Iterator[tuple[float, Any]]:
+    """Yield ``(t, gray_frame)`` one sample at a time, straight off the ffmpeg pipe.
+
+    Sample k is the first decoded frame at or after ``start + k/fps``, and
+    ``t`` is that frame's own timestamp (from ``showinfo``), so the PNG export
+    can seek back to exactly the frame that was scored. Only one frame is held
+    here at a time.
+    """
+    sel = (
+        f"isnan(prev_selected_t)+gt(floor((t+{_GRID_EPS})*{fps:.6f}),"
+        f"floor((prev_selected_t+{_GRID_EPS})*{fps:.6f}))"
+    )
+    vf = f"select='{sel}',showinfo,scale={aw}:{ah}:flags=area,format=gray"
+    cmd = [which_ffmpeg("ffmpeg"), "-hide_banner", "-nostats", "-loglevel", "info", "-y"]
+    seek = f"{start:.6f}"
     if start:
-        cmd += ["-ss", f"{start:.6f}"]
-    cmd += ["-i", path, "-t", f"{end - start:.6f}", "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]
-    duration = max(1.0, end - start)
-    proc = run(cmd, timeout=max(120.0, duration * 2.0), text=False)
-    return proc.stdout or b"", aw, ah
+        cmd += ["-ss", seek]
+    # passthrough: one output frame per selected frame, no CFR duplicates.
+    cmd += ["-i", path, "-t", f"{end - start:.6f}", "-an", "-vf", vf, "-vsync", "0"]
+    cmd += ["-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]
+    base = float(seek) if start else 0.0
+    frame_size = aw * ah
+
+    proc = spawn(cmd, text=False)
+    times: queue.Queue[float] = queue.Queue()
+    frames: queue.Queue[bytes | None] = queue.Queue(maxsize=4)
+    tail: deque[str] = deque(maxlen=20)
+
+    def _read_stderr() -> None:
+        tb: Fraction | None = None
+        assert proc.stderr is not None
+        for raw_line in proc.stderr:
+            line = raw_line.decode("utf-8", "replace").rstrip()
+            m = _SHOWINFO_PTS.search(line)
+            if m:
+                t_rel = float(int(m.group(1)) * tb) if tb is not None else float(m.group(2))
+                times.put(t_rel)
+                continue
+            m = _SHOWINFO_TB.search(line)
+            if m and int(m.group(2)):
+                tb = Fraction(int(m.group(1)), int(m.group(2)))
+                continue
+            if "Parsed_showinfo" not in line:
+                tail.append(line)
+
+    stop = threading.Event()
+
+    def _put(item: bytes | None) -> bool:
+        while not stop.is_set():
+            try:
+                frames.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _read_stdout() -> None:
+        assert proc.stdout is not None
+        try:
+            while True:
+                buf = proc.stdout.read(frame_size)
+                if not buf or len(buf) < frame_size or not _put(buf):
+                    break
+        finally:
+            _put(None)
+
+    readers = [threading.Thread(target=_read_stderr, daemon=True), threading.Thread(target=_read_stdout, daemon=True)]
+    for th in readers:
+        th.start()
+    try:
+        while True:
+            try:
+                buf = frames.get(timeout=_STALL_SECONDS)
+            except queue.Empty:
+                raise FfmpegError(f"ffmpeg made no progress for {_STALL_SECONDS:.0f}s while sampling frames") from None
+            if buf is None:
+                break
+            try:
+                t_rel = times.get(timeout=10.0)
+            except queue.Empty:
+                raise FfmpegError("ffmpeg did not report a frame timestamp") from None
+            yield base + t_rel, np.frombuffer(buf, dtype=np.uint8).reshape((ah, aw))
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            raise FfmpegError("ffmpeg did not exit after its last frame") from None
+        readers[0].join(timeout=5)
+        if proc.returncode != 0:
+            err = "\n".join(tail).strip()
+            raise FfmpegError(f"ffmpeg exited {proc.returncode}: {err[-800:]}", stderr=err)
+    finally:
+        stop.set()
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
 
-def _overlay_flags(np: Any, frames: list[Any], boxes: list[dict[str, int]], threshold: float) -> list[list[int]]:
+def _region_sample(frame: Any, box: dict[str, int]) -> Any:
+    """The skip region's pixels, strided down to at most ``_OVERLAY_MAX_PIXELS``."""
+    w, h = box["w"], box["h"]
+    step = 1
+    while (-(-w // step)) * (-(-h // step)) > _OVERLAY_MAX_PIXELS:
+        step += 1
+    crop = frame[box["y"] : box["y"] + h : step, box["x"] : box["x"] + w : step]
+    return crop.copy()
+
+
+def _overlay_flags(np: Any, samples: list[list[Any]], threshold: float) -> list[list[int]]:
     """Per frame, the skip regions whose pixels differ from that region's usual look.
 
-    The usual look is the per-pixel median over all sampled frames, so an
-    overlay that shows for less than half the clip stands out against it.
+    ``samples[r][i]`` is region ``r`` in frame ``i``. The usual look is the
+    per-pixel median over all sampled frames, so an overlay that shows for
+    less than half the clip stands out against it.
     """
-    flags: list[list[int]] = [[] for _ in frames]
-    for idx, box in enumerate(boxes):
-        y0, y1 = box["y"], box["y"] + box["h"]
-        x0, x1 = box["x"], box["x"] + box["w"]
-        stack = np.stack([f[y0:y1, x0:x1].astype(np.float32) for f in frames])
-        baseline = np.median(stack, axis=0)
-        diffs = np.abs(stack - baseline).mean(axis=(1, 2))
-        for i, d in enumerate(diffs):
-            if float(d) > threshold:
+    n_frames = len(samples[0]) if samples else 0
+    flags: list[list[int]] = [[] for _ in range(n_frames)]
+    for idx, crops in enumerate(samples):
+        baseline = np.median(np.stack(crops), axis=0).astype(np.float32)
+        for i, crop in enumerate(crops):
+            if float(np.abs(crop.astype(np.float32) - baseline).mean()) > threshold:
                 flags[i].append(idx)
     return flags
 
@@ -161,7 +299,7 @@ def _extract_png(path: str, t: float, out_path: Path) -> None:
         "error",
         "-y",
         "-ss",
-        f"{t:.6f}",
+        f"{max(0.0, t - _SEEK_BACK):.6f}",
         "-i",
         path,
         "-frames:v",
@@ -233,11 +371,18 @@ def pick_thumbnail_frames(
     if end <= start:
         return {"ok": False, "error": "end_seconds must be greater than start_seconds"}
 
-    try:
-        raw, aw, ah = _read_frames(path, start, end, fps, width, height)
-    except FfmpegError as exc:
-        return {"ok": False, "error": str(exc)}
+    out_dir: Path | None = None
+    if write_png:
+        if output_dir:
+            out_dir = Path(output_dir)
+        else:
+            src = Path(path)
+            out_dir = src.parent / f"{src.stem}_thumbs"
+        refused = check_output_path(str(out_dir / "thumb.png"))
+        if refused:
+            return refused
 
+    aw, ah = _analysis_size(width, height)
     boxes: list[dict[str, int]] = []
     for box in skip_regions or []:
         parsed = _parse_box(box, width, height)
@@ -256,44 +401,52 @@ def pick_thumbnail_frames(
             }
         )
 
-    frame_size = aw * ah
-    n_frames = len(raw) // frame_size if frame_size else 0
-    if n_frames == 0:
-        return {"ok": False, "error": "no frames decoded", "path": os.path.abspath(path)}
-
-    frames = [
-        np.frombuffer(raw[i * frame_size : (i + 1) * frame_size], dtype=np.uint8).reshape((ah, aw))
-        for i in range(n_frames)
-    ]
-    overlay = _overlay_flags(np, frames, boxes, overlay_thr) if boxes else [[] for _ in frames]
+    # Score each sample as it comes off the pipe; only the previous frame
+    # (for the motion signal), per-frame numbers and small skip-region
+    # crops are kept, never the decoded stream.
     face_status = "unavailable"
     rows: list[dict[str, Any]] = []
-    for i, frame in enumerate(frames):
-        img = frame.astype(np.float32)
-        grad = _gradient(np, img)
-        sharp = _laplacian_var(np, img)
-        if i + 1 < n_frames:
-            motion = float(np.abs(img - frames[i + 1].astype(np.float32)).mean())
-        elif i > 0:
-            motion = float(np.abs(img - frames[i - 1].astype(np.float32)).mean())
-        else:
-            motion = 0.0
-        text_score, text_side = _text_area(np, grad)
-        face, face_status = _face_score(frame, aw, ah)
-        rows.append(
-            {
-                "index": i,
-                "t": round(start + i / fps, 3),
-                "sharpness": sharp,
-                "contrast": min(1.0, float(img.std()) / 64.0),
-                "subject": min(1.0, _subject_fraction(np, grad) / 0.5),
-                "text_area": text_score,
-                "text_side": text_side,
-                "face": face,
-                "motion": motion,
-                "overlay": overlay[i],
-            }
-        )
+    region_samples: list[list[Any]] = [[] for _ in boxes]
+    prev_img: Any = None
+    try:
+        for i, (t_exact, frame) in enumerate(_iter_frames(np, path, start, end, fps, aw, ah)):
+            img = frame.astype(np.float32)
+            if prev_img is not None:
+                rows[-1]["motion"] = float(np.abs(prev_img - img).mean())
+            grad = _gradient(np, img)
+            text_score, text_side = _text_area(np, grad)
+            face, face_status = _face_score(frame, aw, ah)
+            for r_idx, box in enumerate(boxes):
+                region_samples[r_idx].append(_region_sample(frame, box))
+            rows.append(
+                {
+                    "index": i,
+                    "t": round(t_exact, 3),
+                    "t_exact": t_exact,
+                    "sharpness": _laplacian_var(np, img),
+                    "contrast": min(1.0, float(img.std()) / 64.0),
+                    "subject": min(1.0, _subject_fraction(np, grad) / 0.5),
+                    "text_area": text_score,
+                    "text_side": text_side,
+                    "face": face,
+                    "motion": 0.0,
+                    "overlay": [],
+                }
+            )
+            prev_img = img
+    except FfmpegError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    n_frames = len(rows)
+    if n_frames == 0:
+        return {"ok": False, "error": "no frames decoded", "path": os.path.abspath(path)}
+    if n_frames > 1:
+        # The last sample has no next frame; reuse its difference to the one before.
+        rows[-1]["motion"] = rows[-2]["motion"]
+    if boxes:
+        for row, flagged in zip(rows, _overlay_flags(np, region_samples, overlay_thr)):
+            row["overlay"] = flagged
+        region_samples = []
 
     sharp_values = sorted(r["sharpness"] for r in rows)
     median_sharp = sharp_values[len(sharp_values) // 2]
@@ -336,13 +489,9 @@ def pick_thumbnail_frames(
         if len(picks) >= n_i:
             break
 
-    out_dir: Path | None = None
-    if write_png and picks:
-        if output_dir:
-            out_dir = Path(output_dir)
-        else:
-            src = Path(path)
-            out_dir = src.parent / f"{src.stem}_thumbs"
+    if not picks:
+        out_dir = None
+    if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
 
     frames_out: list[dict[str, Any]] = []
@@ -357,7 +506,7 @@ def pick_thumbnail_frames(
         if out_dir is not None:
             png = out_dir / f"thumb_{rank:02d}_{p['t']:09.3f}s.png"
             try:
-                _extract_png(path, float(p["t"]), png)
+                _extract_png(path, float(p["t_exact"]), png)
             except FfmpegError as exc:
                 return {"ok": False, "error": f"PNG export failed at {p['t']}s: {exc}"}
             item["png"] = str(png.resolve())
