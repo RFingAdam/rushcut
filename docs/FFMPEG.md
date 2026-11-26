@@ -20,8 +20,8 @@ Same timeline tools as VEGAS and Resolve: `new_project`, `add_track`,
 
 `length_seconds=-1` probes the file and uses the remaining duration.
 
-`project.save` still writes `.otio` / `.fcpxml` / `.mlt` (plain timeline
-I/O). Rendering is a separate step.
+`project.save` still writes `.otio` / `.fcpxml` / `.mlt` / `.xmeml` and
+`.chapters.txt` / `.chapters.srt` (plain timeline I/O, markers included). Rendering is a separate step.
 
 File-level tools (no timeline required):
 

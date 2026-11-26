@@ -5,6 +5,10 @@ No NLE required. `project.save` writes a file the target editor can import:
 - `.otio` — OpenTimelineIO (Resolve Studio *and* free Resolve, Premiere adapters)
 - `.fcpxml` — Final Cut Pro XML 1.9 (free Resolve ImportTimelineFromFile, FCP)
 - `.mlt` / `.kdenlive` — MLT XML (Shotcut, Kdenlive, `melt` render)
+- `.xmeml` — Final Cut Pro 7 XML (Premiere, Resolve, older NLEs import it)
+- `.chapters.txt` / `.chapters.srt` — the marker list as chapters
+
+Timeline markers are written in each format's native marker element.
 
 This is the free-friendly path when Resolve Studio is not available.
 """
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -95,7 +100,7 @@ class OtioBackend:
         )
         sheet["studio_required"] = False
         sheet["platforms"] = ["windows", "macos", "linux"]
-        sheet["export_formats"] = ["otio", "fcpxml", "mlt"]
+        sheet["export_formats"] = ["otio", "fcpxml", "mlt", "xmeml", "chapters.txt", "chapters.srt"]
         return sheet
 
     def info(self) -> dict[str, Any]:
@@ -308,8 +313,17 @@ class OtioBackend:
             return fail("path is required (use .otio, .fcpxml, .mlt, or .kdenlive)", editor=self.name)
         ext = os.path.splitext(path)[1].lower()
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-        if ext in {".mlt", ".kdenlive"}:
+        lower = path.lower()
+        if lower.endswith(".chapters.txt"):
+            text = to_chapters_txt(self)
+            ext = ".chapters.txt"
+        elif lower.endswith(".chapters.srt"):
+            text = to_chapters_srt(self)
+            ext = ".chapters.srt"
+        elif ext in {".mlt", ".kdenlive"}:
             text = to_mlt(self)
+        elif ext == ".xmeml":
+            text = to_xmeml(self)
         elif ext in {".fcpxml", ".xml"}:
             text = to_fcpxml(self)
         else:
@@ -319,7 +333,7 @@ class OtioBackend:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         self.path = path
-        return ok(path=path, format=ext.lstrip(".") or "otio")
+        return ok(path=path, format=ext.lstrip(".") or "otio", markers=len(self.markers))
 
     # ----- tracks / media / events ------------------------------------
     def _add_track(self, p: dict[str, Any]) -> dict[str, Any]:
@@ -563,8 +577,8 @@ def to_otio(state: OtioBackend) -> dict[str, Any]:
                 media_ref = {"OTIO_SCHEMA": "GeneratorReference.1", "name": ev.get("name") or "Title", "generator_kind": "title"}
             else:
                 url = ev.get("media_path") or ""
-                if url and not url.startswith("file:"):
-                    url = "file://" + quote(os.path.abspath(url).replace("\\", "/"), safe="/:")
+                if url:
+                    url = _file_url(url)
                 media_ref = {"OTIO_SCHEMA": "ExternalReference.1", "target_url": url, "name": ev.get("name")}
             children.append(
                 {
@@ -592,7 +606,12 @@ def to_otio(state: OtioBackend) -> dict[str, Any]:
         "OTIO_SCHEMA": "Timeline.1",
         "name": state.project_name,
         "global_start_time": _rational(0, state.fps),
-        "tracks": {"OTIO_SCHEMA": "Stack.1", "name": "tracks", "children": tracks},
+        "tracks": {
+            "OTIO_SCHEMA": "Stack.1",
+            "name": "tracks",
+            "children": tracks,
+            "markers": [_otio_marker(m, state.fps) for m in _sorted_markers(state)],
+        },
         "metadata": {
             "director": {
                 "width": state.width,
@@ -647,6 +666,17 @@ def to_mlt(state: OtioBackend) -> str:
             cursor = ev["start_seconds"] + ev["length_seconds"]
         playlists.append(pl_id)
     tractor = ET.SubElement(root, "tractor", {"id": "tractor0"})
+    markers = _sorted_markers(state)
+    if markers:
+        block = ET.SubElement(tractor, "properties", {"name": "shotcut:markers"})
+        for i, m in enumerate(markers):
+            entry = ET.SubElement(block, "properties", {"name": str(i)})
+            at = _clock(float(m.get("at_seconds") or 0), millis=True)
+            ET.SubElement(entry, "property", {"name": "text"}).text = str(m.get("name") or "marker")
+            ET.SubElement(entry, "property", {"name": "start"}).text = at
+            ET.SubElement(entry, "property", {"name": "end"}).text = at
+            color = _HEX_COLORS.get(str(m.get("color") or "green").lower(), "#00c000")
+            ET.SubElement(entry, "property", {"name": "color"}).text = color
     for pl in playlists:
         ET.SubElement(tractor, "track", {"producer": pl})
     return _xml(root)
@@ -677,7 +707,7 @@ def to_fcpxml(state: OtioBackend) -> str:
         aid = f"r{n}"
         n += 1
         assets[path] = aid
-        src = path if path.startswith("file:") else "file://" + quote(os.path.abspath(path).replace("\\", "/"), safe="/:")
+        src = _file_url(path)
         ET.SubElement(
             resources,
             "asset",
@@ -691,7 +721,56 @@ def to_fcpxml(state: OtioBackend) -> str:
     # FCPXML spine is a single storyline; flatten video track 0 then the rest as connected clips.
     video_tracks = [tr for tr in state.tracks if tr["type"] == "video"]
     primary = video_tracks[0]["events"] if video_tracks else []
+    pending = _sorted_markers(state)
+    frame = 1.0 / state.fps
+
+    def _at(m: dict[str, Any]) -> float:
+        return max(0.0, float(m.get("at_seconds") or 0))
+
+    def _place(parent: ET.Element, lo: float, hi: float, origin: float, source_start: float) -> None:
+        """Write the pending markers in [lo, hi) onto *parent* (a clip or gap), in its own time.
+
+        *origin* is the timeline time of the element's first frame, which
+        sits at *source_start* in the element's own time.
+        """
+        nonlocal pending
+        inside = [m for m in pending if lo <= _at(m) < hi]
+        for m in inside:
+            local = source_start + max(0.0, _at(m) - origin)
+            ET.SubElement(
+                parent,
+                "chapter-marker",
+                {
+                    "start": _fcp_time(local, state.fps),
+                    "duration": _fcp_time(frame, state.fps),
+                    "value": str(m.get("name") or "marker"),
+                },
+            )
+        pending = [m for m in pending if m not in inside]
+
+    def _gap(lo: float, hi: float) -> None:
+        gap = ET.SubElement(
+            spine,
+            "gap",
+            {
+                "name": "Gap",
+                "offset": _fcp_time(lo, state.fps),
+                "duration": _fcp_time(hi - lo, state.fps),
+                "start": "0s",
+            },
+        )
+        _place(gap, lo, hi, lo, 0.0)
+
+    cursor = 0.0
     for ev in sorted(primary, key=lambda e: e["start_seconds"]):
+        clip_start = float(ev["start_seconds"])
+        clip_end = clip_start + float(ev["length_seconds"])
+        lo = clip_start
+        if clip_start - cursor >= frame / 2:
+            # Empty time before this clip: a gap holds it, and any markers in it.
+            _gap(cursor, clip_start)
+        elif clip_start > cursor:
+            lo = cursor  # sub-frame hole: its markers go on this clip's first frame
         ref = assets.get(ev.get("media_path") or "")
         attrib = {
             "name": ev.get("name") or "clip",
@@ -701,11 +780,185 @@ def to_fcpxml(state: OtioBackend) -> str:
         }
         if ref:
             attrib["ref"] = ref
-            ET.SubElement(spine, "asset-clip", attrib)
+            clip = ET.SubElement(spine, "asset-clip", attrib)
         else:
-            title = ET.SubElement(spine, "title", attrib)
-            ET.SubElement(title, "text").text = ev.get("name") or ""
+            clip = ET.SubElement(spine, "title", attrib)
+            ET.SubElement(clip, "text").text = ev.get("name") or ""
+        # Marker start is in the clip's own source time.
+        _place(clip, lo, clip_end, clip_start, float(ev.get("take_offset_seconds") or 0))
+        cursor = max(cursor, clip_end)
+    if pending:
+        # Markers past the last primary clip (or on an empty spine) go on a trailing gap.
+        _gap(cursor, max(_at(m) for m in pending) + frame)
     return _xml(fcpxml, doctype='<!DOCTYPE fcpxml>')
+
+
+# ----- markers -----------------------------------------------------------
+# OTIO marker colors are an upper-case enum; anything else maps to GREEN.
+_OTIO_COLORS = {"PINK", "RED", "ORANGE", "YELLOW", "GREEN", "CYAN", "BLUE", "PURPLE", "MAGENTA", "BLACK", "WHITE"}
+_HEX_COLORS = {
+    "pink": "#ff66cc", "red": "#ff0000", "orange": "#ff8000", "yellow": "#ffff00", "green": "#00c000",
+    "cyan": "#00ffff", "blue": "#0000ff", "purple": "#8000ff", "magenta": "#ff00ff", "black": "#000000",
+    "white": "#ffffff",
+}
+
+
+def _sorted_markers(state: OtioBackend) -> list[dict[str, Any]]:
+    return sorted(state.markers, key=lambda m: (float(m.get("at_seconds") or 0), str(m.get("name") or "")))
+
+
+def _otio_marker(m: dict[str, Any], fps: float) -> dict[str, Any]:
+    color = str(m.get("color") or "Green").upper()
+    return {
+        "OTIO_SCHEMA": "Marker.2",
+        "name": m.get("name") or "marker",
+        "comment": m.get("note") or "",
+        "color": color if color in _OTIO_COLORS else "GREEN",
+        "marked_range": {
+            "OTIO_SCHEMA": "TimeRange.1",
+            "start_time": _rational(float(m.get("at_seconds") or 0), fps),
+            "duration": _rational(0, fps),
+        },
+        "metadata": {},
+    }
+
+
+def _clock(seconds: float, *, millis: bool, sep: str = ".") -> str:
+    total_ms = int(round(max(0.0, float(seconds)) * 1000))
+    h, rem = divmod(total_ms, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    if millis:
+        return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}"
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def to_chapters_txt(state: OtioBackend) -> str:
+    """One `MM:SS Name` line per marker (the YouTube description format)."""
+    lines = [f"{_clock(float(m.get('at_seconds') or 0), millis=False)} {m.get('name') or 'marker'}" for m in _sorted_markers(state)]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def to_chapters_srt(state: OtioBackend) -> str:
+    """Each marker as an SRT cue running to the next marker (or the timeline end)."""
+    markers = _sorted_markers(state)
+    end_of_timeline = 0.0
+    for tr in state.tracks:
+        for ev in tr["events"]:
+            end_of_timeline = max(end_of_timeline, float(ev["start_seconds"]) + float(ev["length_seconds"]))
+    blocks = []
+    for i, m in enumerate(markers):
+        start = float(m.get("at_seconds") or 0)
+        if i + 1 < len(markers):
+            end = float(markers[i + 1].get("at_seconds") or 0)
+        else:
+            end = max(end_of_timeline, start + 1.0)
+        if end <= start:
+            end = start + 1.0
+        text = str(m.get("name") or "marker")
+        if m.get("note"):
+            text += "\n" + str(m["note"])
+        blocks.append(f"{i + 1}\n{_clock(start, millis=True, sep=',')} --> {_clock(end, millis=True, sep=',')}\n{text}\n")
+    return "\n".join(blocks)
+
+
+def _xmeml_rate(parent: ET.Element, fps: float) -> None:
+    rate = ET.SubElement(parent, "rate")
+    timebase = int(round(fps))
+    ET.SubElement(rate, "timebase").text = str(timebase)
+    ntsc = abs(fps - timebase) > 1e-3
+    ET.SubElement(rate, "ntsc").text = "TRUE" if ntsc else "FALSE"
+
+
+def to_xmeml(state: OtioBackend) -> str:
+    """Final Cut Pro 7 XML (xmeml v5). Premiere Pro and Resolve import it."""
+    fps = state.fps
+    root = ET.Element("xmeml", {"version": "5"})
+    seq = ET.SubElement(root, "sequence", {"id": "sequence-1"})
+    ET.SubElement(seq, "name").text = state.project_name
+    end_frames = 0
+    for tr in state.tracks:
+        for ev in tr["events"]:
+            end_frames = max(end_frames, int(round((ev["start_seconds"] + ev["length_seconds"]) * fps)))
+    ET.SubElement(seq, "duration").text = str(end_frames)
+    _xmeml_rate(seq, fps)
+    media = ET.SubElement(seq, "media")
+    video = ET.SubElement(media, "video")
+    fmt = ET.SubElement(video, "format")
+    chars = ET.SubElement(fmt, "samplecharacteristics")
+    _xmeml_rate(chars, fps)
+    ET.SubElement(chars, "width").text = str(state.width)
+    ET.SubElement(chars, "height").text = str(state.height)
+    audio = ET.SubElement(media, "audio")
+
+    files: dict[str, str] = {}
+    n_clip = 0
+    for tr in state.tracks:
+        if tr["type"] not in {"video", "audio"}:
+            continue
+        track = ET.SubElement(video if tr["type"] == "video" else audio, "track")
+        for ev in sorted(tr["events"], key=lambda e: e["start_seconds"]):
+            path = str(ev.get("media_path") or "")
+            n_clip += 1
+            start_f = int(round(ev["start_seconds"] * fps))
+            length_f = max(1, int(round(ev["length_seconds"] * fps)))
+            in_f = int(round(float(ev.get("take_offset_seconds") or 0) * fps))
+            if path.startswith("title:"):
+                item = ET.SubElement(track, "generatoritem", {"id": f"generatoritem-{n_clip}"})
+                ET.SubElement(item, "name").text = ev.get("name") or "Title"
+            else:
+                item = ET.SubElement(track, "clipitem", {"id": f"clipitem-{n_clip}"})
+                ET.SubElement(item, "name").text = ev.get("name") or os.path.basename(path) or "clip"
+            ET.SubElement(item, "duration").text = str(in_f + length_f)
+            _xmeml_rate(item, fps)
+            ET.SubElement(item, "start").text = str(start_f)
+            ET.SubElement(item, "end").text = str(start_f + length_f)
+            ET.SubElement(item, "in").text = str(in_f)
+            ET.SubElement(item, "out").text = str(in_f + length_f)
+            if path.startswith("title:"):
+                continue
+            if path in files:
+                ET.SubElement(item, "file", {"id": files[path]})
+                continue
+            fid = f"file-{len(files) + 1}"
+            files[path] = fid
+            file_el = ET.SubElement(item, "file", {"id": fid})
+            ET.SubElement(file_el, "name").text = os.path.basename(path) or "media"
+            url = _file_url(path)
+            ET.SubElement(file_el, "pathurl").text = url
+            _xmeml_rate(file_el, fps)
+            file_media = ET.SubElement(file_el, "media")
+            ET.SubElement(file_media, "video")
+            ET.SubElement(file_media, "audio")
+
+    for m in _sorted_markers(state):
+        marker = ET.SubElement(seq, "marker")
+        ET.SubElement(marker, "name").text = m.get("name") or "marker"
+        ET.SubElement(marker, "comment").text = m.get("note") or ""
+        ET.SubElement(marker, "in").text = str(int(round(float(m.get("at_seconds") or 0) * fps)))
+        ET.SubElement(marker, "out").text = "-1"
+    return _xml(root, doctype="<!DOCTYPE xmeml>")
+
+
+_WIN_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _file_url(path: str) -> str:
+    """A ``file://`` URL for a media path: ``/a/b`` -> ``file:///a/b``, ``C:\\a`` -> ``file:///C:/a``.
+
+    Windows paths are kept as written even when running on POSIX. UNC paths
+    (``\\\\host\\share\\a``) become ``file://host/share/a``.
+    """
+    if path.startswith("file:"):
+        return path
+    unc = path.startswith("\\\\") or (os.name == "nt" and path.startswith("//"))
+    p = path if unc or _WIN_DRIVE.match(path) else os.path.abspath(path)
+    p = p.replace("\\", "/")
+    if unc:
+        return "file:" + quote(p, safe="/:")
+    if not p.startswith("/"):
+        p = "/" + p
+    return "file://" + quote(p, safe="/:")
 
 
 def _fcp_time(seconds: float, fps: float) -> str:

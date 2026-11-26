@@ -64,7 +64,7 @@ Blackmagic Design. See [NOTICE](NOTICE).
 | `ffmpeg` (aliases `ff`, `headless`) | Headless FFmpeg | No | `ffmpeg` + `ffprobe` on PATH | In-memory timeline, rendered to MP4 by `render_start` / `render_with_preset`. Transport tools are unsupported (no GUI). |
 | `vegas` (default) | MAGIX VEGAS Pro via `ScriptPortal.Vegas` | Yes | Windows, licensed VEGAS Pro 22+ (VEGAS Pro 2027 is detected too) | C# host inside VEGAS on `127.0.0.1:8752`. Application Extension (auto-start) or Script Menu mode. Native Titles & Text, VideoMotion, render templates. |
 | `resolve` (aliases `davinci`, `davinci-resolve`) | DaVinci Resolve via `DaVinciResolveScript` | Yes | **Resolve Studio 21.1+**, Preferences > System > General > External scripting = Local | The free edition has no scripting API since 21.1. Studio extras: subtitles from audio, Smart Reframe, voice isolation. |
-| `otio` (aliases `fcpxml`, `mlt`, `kdenlive`, `shotcut`) | In-memory timeline interchange | No | Nothing extra | `save_project` writes `.otio`, `.fcpxml` or `.mlt`. Timeline I/O only, not a renderer. |
+| `otio` (aliases `fcpxml`, `mlt`, `kdenlive`, `shotcut`) | In-memory timeline interchange | No | Nothing extra | `save_project` writes `.otio`, `.fcpxml`, `.mlt` or `.xmeml` (FCP7 XML), with markers, or a `.chapters.txt` / `.chapters.srt` chapter list. Timeline I/O only, not a renderer. |
 
 `vegas` stays the default so existing installs keep working. For a first run,
 set `DIRECTOR_EDITOR=ffmpeg`. Call `list_editors`, `editor_info` and
